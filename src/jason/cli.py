@@ -499,17 +499,38 @@ def features_outliers(
 
 @model_app.command("train")
 def model_train() -> None:
-    """Train the LightGBM multiplier regressor."""
-    raise typer.Exit(_not_yet("model train", "Phase 3"))
+    """Train the LightGBM multiplier regressor on eligible videos with multipliers.
+
+    Requires `uv sync --group ml` and that `jason features outliers` has populated
+    multipliers (which itself requires ~28 days of `jason snapshot run` history).
+    """
+    import logging as _logging
+    _logging.basicConfig(level=_logging.INFO, format="%(message)s")
+
+    from jason.models.train import train
+    result = train()
+    typer.echo(f"trained {result.n_train} / val {result.n_val}")
+    typer.secho(f"  spearman:                       {result.spearman:.4f}", fg=typer.colors.GREEN)
+    typer.secho(f"  pairwise intra-bucket accuracy: {result.pairwise_intra_bucket_accuracy:.4f}",
+                fg=typer.colors.GREEN)
+    typer.echo(f"  artifact: {result.artifact_dir}")
+    typer.echo("  top 8 features by importance:")
+    for name, imp in list(result.feature_importance.items())[:8]:
+        typer.echo(f"    {name:<30} {imp:>8.0f}")
 
 
 @model_app.command("score")
 def model_score(
     title: str = typer.Option(..., "--title"),
     channel: str = typer.Option(..., "--channel"),
+    duration: int = typer.Option(600, "--duration", help="Hypothetical duration in seconds."),
 ) -> None:
-    """Score a candidate title for a given channel."""
-    raise typer.Exit(_not_yet("model score", "Phase 3"))
+    """Score a candidate title — returns predicted multiplier."""
+    from jason.models.predict import score_title
+
+    r = score_title(title, channel, duration_s=duration)
+    typer.secho(f"predicted multiplier: {r['multiplier']:.2f}x", fg=typer.colors.GREEN)
+    typer.echo(f"  log_multiplier: {r['log_multiplier']:.4f}")
 
 
 # --- suggest (Phase 4) -------------------------------------------------------

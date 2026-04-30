@@ -41,6 +41,9 @@ ml = [
     "pillow>=10.4",                 # required by open_clip preprocessing
     "torch>=2.4",                   # backbone of both
     "bertopic>=0.16",               # two-layer topic modeling (themes + franchises)
+    "lightgbm>=4.5",                # multiplier regressor (Fase 3)
+    "scikit-learn>=1.5",            # k-means cluster of embeddings + Spearman / metrics
+    "pandas>=2.2",                  # feature matrix assembly + temporal split
 ]
 
 [tool.ruff]

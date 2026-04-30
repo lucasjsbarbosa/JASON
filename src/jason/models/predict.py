@@ -1,0 +1,128 @@
+"""Score a candidate title (and optionally thumbnail) with the trained model.
+
+Loads the artifacts written by `train.py`. The score is the predicted
+`log1p(multiplier)`; the function exposes it as both raw log-space and the
+exponentiated multiplier value (more interpretable: "this title looks like
+a 3.2× outlier for this channel").
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import pickle
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
+from jason.config import get_settings
+from jason.models.features import (
+    CATEGORICAL_COLS,
+    SCALAR_FEATURE_COLS,
+    assemble_score_row,
+)
+from jason.models.train import ARTIFACT_VERSION
+
+logger = logging.getLogger(__name__)
+
+
+def _artifact_dir() -> Path:
+    return Path(__file__).parent / "artifacts" / f"multiplier_{ARTIFACT_VERSION}"
+
+
+def _load_artifacts(artifact_dir: Path | None = None) -> dict[str, Any]:
+    import lightgbm as lgb  # noqa: PLC0415
+
+    art = artifact_dir or _artifact_dir()
+    if not art.exists():
+        raise FileNotFoundError(
+            f"no model artifacts at {art}. Run `jason model train` first."
+        )
+
+    booster = lgb.Booster(model_file=str(art / "model.lgb"))
+    meta = json.loads((art / "meta.json").read_text(encoding="utf-8"))
+
+    title_km = None
+    thumb_km = None
+    if (art / "title_kmeans.pkl").exists():
+        with (art / "title_kmeans.pkl").open("rb") as f:
+            title_km = pickle.load(f)  # noqa: S301
+    if (art / "thumb_kmeans.pkl").exists():
+        with (art / "thumb_kmeans.pkl").open("rb") as f:
+            thumb_km = pickle.load(f)  # noqa: S301
+
+    return {
+        "booster": booster,
+        "meta": meta,
+        "title_kmeans": title_km,
+        "thumb_kmeans": thumb_km,
+    }
+
+
+def _featurize_for_score(
+    row: pd.DataFrame, *, title_kmeans, thumb_kmeans, feature_columns: list[str]
+) -> pd.DataFrame:
+    X = row[list(SCALAR_FEATURE_COLS)].copy()
+    for c in CATEGORICAL_COLS:
+        X[c] = row[c].astype("category")
+
+    if title_kmeans is not None:
+        emb = row["title_embedding"].iloc[0]
+        if emb is None:
+            emb = [0.0] * title_kmeans.n_features_in_
+        X["title_cluster"] = pd.Categorical(title_kmeans.predict(np.array([emb], dtype=np.float32)))
+    if thumb_kmeans is not None:
+        emb = row["thumb_embedding"].iloc[0]
+        if emb is None:
+            emb = [0.0] * thumb_kmeans.n_features_in_
+        X["thumb_cluster"] = pd.Categorical(thumb_kmeans.predict(np.array([emb], dtype=np.float32)))
+
+    # Reorder to the exact training column order so LightGBM doesn't complain.
+    return X[feature_columns]
+
+
+def score_title(
+    title: str,
+    channel_id: str,
+    *,
+    duration_s: int = 600,
+    published_at: datetime | None = None,
+    title_embedding: list[float] | None = None,
+    thumb_embedding: list[float] | None = None,
+    artifact_dir: Path | None = None,
+    db_path: Path | None = None,
+) -> dict[str, float]:
+    """Predict the expected multiplier for a candidate title on `channel_id`.
+
+    Returns:
+        dict with `log_multiplier` (raw model output) and `multiplier`
+        (exponentiated, the human-readable "outlier score").
+    """
+    settings = get_settings()
+    artifacts = _load_artifacts(artifact_dir)
+    booster = artifacts["booster"]
+    meta = artifacts["meta"]
+
+    pub = published_at or datetime.now(UTC).replace(microsecond=0)
+    row = assemble_score_row(
+        title=title,
+        channel_id=channel_id,
+        published_at=pub,
+        duration_s=duration_s,
+        title_embedding=title_embedding,
+        thumb_embedding=thumb_embedding,
+        db_path=db_path or settings.duckdb_path,
+    )
+
+    X = _featurize_for_score(
+        row,
+        title_kmeans=artifacts["title_kmeans"],
+        thumb_kmeans=artifacts["thumb_kmeans"],
+        feature_columns=meta["feature_columns"],
+    )
+
+    log_mult = float(booster.predict(X)[0])
+    return {"log_multiplier": log_mult, "multiplier": float(np.expm1(log_mult))}
