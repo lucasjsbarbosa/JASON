@@ -78,6 +78,31 @@ _EXTREME_ADJ_RE = re.compile(
     r")\b"
 )
 
+# Definite referring expressions (Loewenstein curiosity gap signature).
+# "este filme", "essa cena", "aquele momento" — sinaliza referência sem
+# antecedente claro, premia o clique.
+_DEFINITE_REF_RE = re.compile(
+    r"\b(este|esse|aquele|aquela|essa|esta|isto|isso|aquilo|esses|essas|aqueles|aquelas)\b",
+    re.IGNORECASE,
+)
+
+# Forward-referencing pronouns (cataphora). PT-BR tem pronoun-drop, então
+# isso é mais ruidoso que em inglês — mas pronome explícito antes do
+# antecedente ainda é sinal de clickbait. Match em pronomes 3a pessoa.
+_FORWARD_REF_RE = re.compile(
+    r"\b(ele|ela|eles|elas)\b",
+    re.IGNORECASE,
+)
+
+# Superlatives + intensifiers: "MAIS X", "MELHOR/PIOR", "demais", "muito".
+# Densidade alta dessas palavras é um marcador de clickbait/curiosity gap
+# por Banerjee & Urminsky.
+_SUPERLATIVE_RE = re.compile(
+    r"\b(mais|menos|demais|muito|maior|menor|melhor|pior|extremamente|"
+    r"absurdamente|incrivelmente|completamente|totalmente)\b",
+    re.IGNORECASE,
+)
+
 
 def _strip_accents(text: str) -> str:
     """Lowercased + NFD-decomposed + stripped of combining marks. PT-friendly."""
@@ -99,9 +124,25 @@ def extract_features(title: str) -> dict[str, Any]:
     normalized = _strip_accents(title)
     upper_count = sum(1 for c in title if c.isupper())
 
+    # Word-level metrics (paper-backed: clickbait detection +25pp accuracy
+    # going from binary to gradient features).
+    words = title.split()
+    word_count = len(words)
+    word_lengths = [len(w) for w in words] if words else [0]
+    avg_word_length = sum(word_lengths) / len(word_lengths)
+
+    # Curiosity-gap signatures (Loewenstein 1994; Chakraborty et al. 2016).
+    definite_refs = len(_DEFINITE_REF_RE.findall(title))
+    forward_refs = len(_FORWARD_REF_RE.findall(title))
+    superlatives = len(_SUPERLATIVE_RE.findall(title))
+
+    # Density: per word so longer titles don't auto-win.
+    superlative_density = (superlatives / word_count) if word_count else 0.0
+
     return {
         "char_len": char_len,
-        "word_count": len(title.split()),
+        "word_count": word_count,
+        "avg_word_length": avg_word_length,
         "has_number": bool(_NUMBER_RE.search(title)),
         "has_emoji": bool(_EMOJI_RE.search(title)),
         "has_question_mark": "?" in title,
@@ -112,6 +153,9 @@ def extract_features(title: str) -> dict[str, Any]:
         "has_ranking_keyword": bool(_RANKING_RE.search(normalized)),
         "has_curiosity_keyword": bool(_CURIOSITY_RE.search(normalized)),
         "has_extreme_adjective": bool(_EXTREME_ADJ_RE.search(normalized)),
+        "definite_ref_count": definite_refs,
+        "forward_ref_count": forward_refs,
+        "superlative_density": superlative_density,
     }
 
 
@@ -119,11 +163,12 @@ def extract_features(title: str) -> dict[str, Any]:
 
 
 _FEATURE_COLUMNS = (
-    "char_len", "word_count",
+    "char_len", "word_count", "avg_word_length",
     "has_number", "has_emoji", "has_question_mark",
     "has_caps_word", "caps_ratio", "has_first_person",
     "has_explained_keyword", "has_ranking_keyword",
     "has_curiosity_keyword", "has_extreme_adjective",
+    "definite_ref_count", "forward_ref_count", "superlative_density",
 )
 
 

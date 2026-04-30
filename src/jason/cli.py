@@ -564,6 +564,37 @@ def features_title(
     )
 
 
+@features_app.command("sentiment")
+def features_sentiment(
+    channel: str | None = typer.Option(
+        None, "--channel", "-c",
+        help="Limit to one channel (UC...). Default: all videos.",
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Recompute even already-populated rows.",
+    ),
+    batch_size: int = typer.Option(32, help="Sentiment encoder batch size."),
+) -> None:
+    """Score sentiment de cada título via pysentimiento (PT-BR).
+
+    Score em [-1.0, +1.0]: -1 muito negativo, +1 muito positivo. Persistido
+    em `video_features.sentiment_score`. Modelo Robertuito ~500MB baixado
+    no primeiro uso. Requer `uv sync --group ml`.
+    """
+    import logging as _logging
+    _logging.basicConfig(level=_logging.INFO, format="%(message)s")
+
+    from jason.features.sentiment import compute_sentiment
+
+    result = compute_sentiment(
+        channel_id=channel, force=force, batch_size=batch_size, show_progress=True,
+    )
+    typer.secho(
+        f"sentiment: {result['encoded']} encoded (of {result['requested']} pending)",
+        fg=typer.colors.GREEN,
+    )
+
+
 @features_app.command("topics")
 def features_topics(
     themes: bool = typer.Option(False, "--themes", help="Fit BERTopic on masked titles."),

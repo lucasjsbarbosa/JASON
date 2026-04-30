@@ -53,6 +53,7 @@ ml = [
     "pandas>=2.2",                  # feature matrix assembly + temporal split
     "opencv-python>=4.10",          # frame quality + face detection (Fase 4.5)
     "optuna>=4.8.0",
+    "pysentimiento>=0.7.3",
 ]
 
 [tool.ruff]

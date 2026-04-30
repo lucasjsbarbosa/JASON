@@ -23,11 +23,9 @@ def _setup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     get_settings.cache_clear()
     db.parent.mkdir(parents=True, exist_ok=True)
-    schema_001 = Path("migrations/001_init.sql").read_text(encoding="utf-8")
-    schema_004 = Path("migrations/004_video_features.sql").read_text(encoding="utf-8")
     with duckdb.connect(str(db)) as con:
-        con.execute(schema_001)
-        con.execute(schema_004)
+        for name in ("001_init.sql", "004_video_features.sql", "010_paper_backed_features.sql"):
+            con.execute(Path(f"migrations/{name}").read_text(encoding="utf-8"))
     return db
 
 

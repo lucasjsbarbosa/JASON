@@ -30,7 +30,7 @@ FEATURE_LABELS: dict[str, str] = {
     "caps_ratio":              "% do título em CAPS",
     "char_len":                "Tamanho do título (caracteres)",
     "word_count":              "Quantidade de palavras",
-    "sentiment_score":         "Sentimento do título",
+    "sentiment_score":         "Sentimento do título (positivo/negativo)",
     # Video / channel
     "duration_s":              "Duração do vídeo",
     "subs_bucket":             "Tamanho do canal (faixa de inscritos)",
@@ -102,6 +102,21 @@ def humanize_value(feature: str, raw_value: Any) -> str:
         try:
             i = int(float(s))
             return ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"][i] if 0 <= i <= 6 else s
+        except (TypeError, ValueError):
+            return s
+
+    if feature == "sentiment_score":
+        try:
+            v = float(s)
+            if v >= 0.5:
+                return f"muito positivo ({v:+.2f})"
+            if v >= 0.2:
+                return f"positivo ({v:+.2f})"
+            if v >= -0.2:
+                return f"neutro ({v:+.2f})"
+            if v >= -0.5:
+                return f"negativo ({v:+.2f})"
+            return f"muito negativo ({v:+.2f})"
         except (TypeError, ValueError):
             return s
 

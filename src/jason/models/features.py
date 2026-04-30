@@ -22,11 +22,13 @@ if TYPE_CHECKING:  # pragma: no cover
 
 # Title-feature columns we hand directly to LightGBM (boolean → 0/1, numeric as-is).
 TITLE_FEATURE_COLS = (
-    "char_len", "word_count", "caps_ratio",
+    "char_len", "word_count", "avg_word_length", "caps_ratio",
     "has_number", "has_emoji", "has_question_mark", "has_caps_word",
     "has_first_person",
     "has_explained_keyword", "has_ranking_keyword",
     "has_curiosity_keyword", "has_extreme_adjective",
+    "definite_ref_count", "forward_ref_count", "superlative_density",
+    "sentiment_score",
 )
 
 # Categorical features (LightGBM handles natively as `category` dtype).
@@ -106,6 +108,10 @@ def build_feature_matrix(
         SELECT v.id, v.channel_id, v.published_at, v.duration_s,
                c.subs,
                f.char_len, f.word_count, f.caps_ratio,
+               COALESCE(f.avg_word_length, 0.0)         AS avg_word_length,
+               COALESCE(f.definite_ref_count, 0)        AS definite_ref_count,
+               COALESCE(f.forward_ref_count, 0)         AS forward_ref_count,
+               COALESCE(f.superlative_density, 0.0)     AS superlative_density,
                CAST(f.has_number AS INTEGER)            AS has_number,
                CAST(f.has_emoji AS INTEGER)             AS has_emoji,
                CAST(f.has_question_mark AS INTEGER)     AS has_question_mark,
@@ -115,6 +121,7 @@ def build_feature_matrix(
                CAST(f.has_ranking_keyword AS INTEGER)   AS has_ranking_keyword,
                CAST(f.has_curiosity_keyword AS INTEGER) AS has_curiosity_keyword,
                CAST(f.has_extreme_adjective AS INTEGER) AS has_extreme_adjective,
+               COALESCE(f.sentiment_score, 0.0)         AS sentiment_score,
                COALESCE(f.theme_id, -1)     AS theme_id,
                COALESCE(f.franchise_id, -1) AS franchise_id,
                f.title_embedding,
