@@ -36,6 +36,10 @@ dev = [
 #   uv sync --group ml
 ml = [
     "faster-whisper>=1.1",
+    "sentence-transformers>=3.0",   # paraphrase-multilingual-mpnet-base-v2 for titles
+    "open_clip_torch>=2.26",        # ViT-B-32 for thumbnails
+    "pillow>=10.4",                 # required by open_clip preprocessing
+    "torch>=2.4",                   # backbone of both
 ]
 
 [tool.ruff]

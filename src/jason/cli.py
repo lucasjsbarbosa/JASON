@@ -388,6 +388,41 @@ def features_title(
     )
 
 
+@features_app.command("embeddings")
+def features_embeddings(
+    titles: bool = typer.Option(False, "--titles", help="Encode title embeddings."),
+    thumbnails: bool = typer.Option(False, "--thumbnails", help="Encode thumbnail embeddings."),
+    channel: str | None = typer.Option(
+        None, "--channel", "-c", help="Limit to one channel (UC...).",
+    ),
+    force: bool = typer.Option(False, "--force", help="Recompute even if already present."),
+) -> None:
+    """Compute title (sentence-transformers) and/or thumbnail (OpenCLIP) embeddings.
+
+    Requires the optional `ml` dependency group: `uv sync --group ml`.
+    First run downloads ~1.6GB of models.
+    """
+    if not (titles or thumbnails):
+        typer.echo("Pick --titles, --thumbnails, or both.", err=True)
+        raise typer.Exit(1)
+
+    if titles:
+        from jason.features.embeddings import embed_titles
+        r = embed_titles(channel_id=channel, force=force)
+        typer.secho(
+            f"title embeddings: {r['encoded']} encoded (of {r['requested']} pending)",
+            fg=typer.colors.GREEN,
+        )
+
+    if thumbnails:
+        from jason.features.embeddings import embed_thumbnails
+        r = embed_thumbnails(channel_id=channel, force=force)
+        typer.secho(
+            f"thumb embeddings: {r['encoded']} encoded (of {r['requested']} pending)",
+            fg=typer.colors.GREEN,
+        )
+
+
 @features_app.command("outliers")
 def features_outliers(
     channel: str | None = typer.Option(
