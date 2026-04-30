@@ -614,5 +614,15 @@ def _not_yet(cmd: str, phase: str) -> int:
     return 1
 
 
+@app.command("dashboard")
+def dashboard() -> None:
+    """Launch the Streamlit dashboard. Convenience wrapper for streamlit run."""
+    import subprocess
+    import sys
+    from pathlib import Path
+    app_path = Path(__file__).parent / "dashboard" / "app.py"
+    subprocess.run([sys.executable, "-m", "streamlit", "run", str(app_path)], check=True)
+
+
 if __name__ == "__main__":
     app()
