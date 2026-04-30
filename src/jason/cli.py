@@ -129,9 +129,85 @@ def ingest_channels(
 def ingest_neighbors(
     file: Path = typer.Option(..., "--file", help="File with one @handle or UC... per line."),
     dry_run: bool = typer.Option(False, "--dry-run"),
+    skip_existing: bool = typer.Option(
+        True, "--skip-existing/--reingest",
+        help="Pula canais já no DB (default). Use --reingest pra forçar refresh.",
+    ),
 ) -> None:
-    """Batch-ingest neighbor channels from a list."""
-    raise typer.Exit(_not_yet("ingest neighbors", "Phase 1"))
+    """Batch-ingest canais vizinhos a partir de um arquivo de @handles.
+
+    Resolve cada @handle pra UC... (cache em handle_cache), então roda
+    ingest_channel pra cada um sequencialmente. Pula canais já ingeridos
+    por default — use --reingest pra atualizar.
+    """
+    import duckdb  # noqa: PLC0415
+
+    from jason.ingestion.handle_resolver import resolve_handles
+    from jason.ingestion.youtube_data import ingest_channel
+
+    handles = []
+    for raw in file.read_text(encoding="utf-8").splitlines():
+        stripped = raw.split("#", 1)[0].strip()
+        if stripped:
+            handles.append(stripped)
+    if not handles:
+        typer.echo(f"no handles in {file}", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"resolving {len(handles)} handle(s)...")
+    resolved = resolve_handles(handles)
+
+    settings = get_settings()
+    existing: set[str] = set()
+    if skip_existing:
+        with duckdb.connect(str(settings.duckdb_path), read_only=True) as con:
+            existing = {r[0] for r in con.execute("SELECT id FROM channels").fetchall()}
+
+    todo = [
+        (h, cid) for h, cid in resolved.items()
+        if cid and (not skip_existing or cid not in existing)
+    ]
+    skipped = [h for h, cid in resolved.items() if cid and cid in existing]
+    not_found = [h for h, cid in resolved.items() if not cid]
+
+    typer.echo(
+        f"  resolved: {sum(1 for v in resolved.values() if v)}/{len(handles)} · "
+        f"todo: {len(todo)} · skip(já no DB): {len(skipped)} · not_found: {len(not_found)}"
+    )
+    if not_found:
+        for h in not_found:
+            typer.secho(f"    NOT FOUND: {h}", fg=typer.colors.RED)
+
+    if dry_run:
+        typer.echo("\n[dry-run] would ingest:")
+        for h, cid in todo:
+            typer.echo(f"    {h:<35} {cid}")
+        raise typer.Exit(0)
+
+    if not todo:
+        typer.secho("nada pra ingerir", fg=typer.colors.YELLOW)
+        return
+
+    typer.echo(f"\ningesting {len(todo)} channel(s)...")
+    failures: list[tuple[str, str]] = []
+    for i, (h, cid) in enumerate(todo, start=1):
+        typer.echo(f"\n[{i}/{len(todo)}] {h} ({cid})")
+        try:
+            result = ingest_channel(cid)
+            typer.secho(
+                f"   ok: {result['video_count']} videos "
+                f"({result['snapshot_count']} snapshots)",
+                fg=typer.colors.GREEN,
+            )
+        except Exception as exc:  # noqa: BLE001
+            typer.secho(f"   FAIL: {exc}", fg=typer.colors.RED)
+            failures.append((h, str(exc)))
+
+    typer.echo(f"\ndone: {len(todo) - len(failures)}/{len(todo)} channels ingested")
+    if failures:
+        typer.secho(f"  {len(failures)} failures:", fg=typer.colors.RED)
+        for h, err in failures:
+            typer.echo(f"    {h}: {err}")
 
 
 @ingest_app.command("tmdb-releases")
@@ -256,6 +332,66 @@ def ingest_thumbnails(
         f"(of {result['requested']} requested)",
         fg=typer.colors.GREEN if result["failed"] == 0 else typer.colors.YELLOW,
     )
+
+
+@ingest_app.command("discover")
+def ingest_discover(
+    output: Path = typer.Option(
+        Path("data/discover_candidates.md"), "--output", "-o",
+        help="Markdown table com canais candidatos pra revisar.",
+    ),
+    min_subs: int = typer.Option(500, help="Subs mínimos."),
+    max_subs: int = typer.Option(30_000, help="Subs máximos (cap em tier_1+borda tier_2)."),
+    horror_threshold: float = typer.Option(
+        0.3, "--horror-threshold",
+        help="Mínimo de %% dos títulos recentes que devem bater regex de horror.",
+    ),
+    sample_size: int = typer.Option(10, help="Quantos títulos recentes amostrar por canal."),
+    top_n: int = typer.Option(50, help="Quantos candidatos mostrar no markdown final."),
+) -> None:
+    """Descobre canais BR-PT de horror em tier_0/1 pra expandir o sample.
+
+    Pipeline: search YouTube por queries de terror → bulk channels.list →
+    filtra por subs/PT-BR → valida horror via descrição + % de títulos
+    recentes que batem regex. Output: markdown table pro humano revisar
+    antes de adicionar a `canais.txt`.
+
+    Quota estimada: ~2k unidades (de 10k disponíveis/dia).
+    """
+    import duckdb  # noqa: PLC0415
+
+    from jason.ingestion.discover import discover, format_markdown
+
+    settings = get_settings()
+    with duckdb.connect(str(settings.duckdb_path), read_only=True) as con:
+        existing = {r[0] for r in con.execute("SELECT id FROM channels").fetchall()}
+    typer.echo(f"skipando {len(existing)} canais já no pool")
+
+    candidates = discover(
+        min_subs=min_subs,
+        max_subs=max_subs,
+        horror_title_threshold=horror_threshold,
+        sample_size=sample_size,
+        existing_ids=existing,
+    )
+
+    if not candidates:
+        typer.secho("nenhum candidato encontrado", fg=typer.colors.YELLOW)
+        return
+
+    md = format_markdown(candidates, top_n=top_n)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(md, encoding="utf-8")
+    typer.secho(
+        f"{len(candidates)} candidatos. top {top_n} em {output}",
+        fg=typer.colors.GREEN,
+    )
+    typer.echo("\nReview manual + adicione os escolhidos em canais.txt:")
+    for c in candidates[:5]:
+        typer.echo(
+            f"  {c.handle or c.channel_id} ({c.subs:,} subs) — "
+            f"{c.horror_title_rate*100:.0f}% horror | {c.title[:40]}"
+        )
 
 
 @ingest_app.command("resolve-handles")

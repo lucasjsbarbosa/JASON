@@ -23,6 +23,24 @@
 @oswaldomarchi               # ~13.3k — horror/trash, voz autoral
 @ahoradopesadelopodcast      # ~2.7k — análise/lives/horror news
 @terrorsemmedo13             # ~434 — abaixo da faixa, mas muito ativo
+@EdNerdCanal                 # sugestão @babygiulybaby — terror, "watched together"
+
+# === DESCOBERTA AUTOMÁTICA 2026-04-30 (jason ingest discover, filtro anti-gaming) ===
+@senhorterrorapresenta       # ~1.1k — 100% horror, review puro
+@oianafernandes              # ~6.7k — análise interpretativa estilo Vídeo Terapia
+@final_girl                  # ~2.4k — review crítica de horror
+@terrorepipoca               # ~2.4k — reviews de terror
+@carnoficina                 # ~26k — listas/reviews horror obscuro
+@cinematologiaterror         # ~766 — reviews de terror recente
+@cafeinna                    # ~3.5k — reviews
+@fanaticosnoterror           # ~1.7k — reviews + curiosidades
+@ollyverso                   # ~1.8k — Top X perturbadores, ranking style
+@7marte                      # ~3.1k — análise interpretativa
+@cinehorror101               # ~3.3k — reviews + autor
+@filmatizandooficial         # ~3.3k — análise crítica explícita
+@cacadoresdefilmes9111       # ~579 — reviews + curiosidades
+@teiasdeterror               # ~935 — descoberta v2, 100% horror review
+@filmesencontrados           # ~21.3k — curiosidades/reviews "filmes esquecidos da TV"
 
 # === ATIVOS DA RODADA ANTERIOR (mantidos) ===================================
 @IconografiaDaHistoria       # 1.89M — análises profundas
