@@ -44,16 +44,18 @@ def face_score(frame_path: Path) -> float:
     return 0.5
 
 
-def _outlier_centroid(
+def _outlier_embeddings(
     *,
     db_path: Path,
     theme_id: int | None = None,
     percentile_threshold: float = 90.0,
-) -> list[float] | None:
-    """Average thumb_embedding of outlier thumbnails (optionally same theme).
-    Returns None if no qualifying samples exist."""
-    import numpy as np  # noqa: PLC0415
+) -> list[list[float]]:
+    """Raw outlier thumb_embeddings (optionally same theme).
 
+    Returns the list of L2-normalized 512-d vectors. Caller decides what to do
+    with them — centroid (washes-out distinctive signals) vs max-sim top-K
+    (premia 1 clone) vs mean(top-K) (robusto, recomendado).
+    """
     sql = """
         SELECT f.thumb_embedding
         FROM video_features f
@@ -68,30 +70,44 @@ def _outlier_centroid(
 
     with duckdb.connect(str(db_path), read_only=True) as con:
         rows = con.execute(sql, params).fetchall()
-    if not rows:
-        return None
-
-    arr = np.array([list(r[0]) for r in rows], dtype=np.float32)
-    centroid = arr.mean(axis=0)
-    norm = float(np.linalg.norm(centroid))
-    if norm > 0:
-        centroid = centroid / norm
-    return centroid.tolist()
+    return [list(r[0]) for r in rows if r[0] is not None]
 
 
 def outlier_similarity_for_frame(
     frame_path: Path,
     *,
-    centroid: list[float],
+    outlier_embeddings: list[list[float]],
+    top_k: int = 5,
     encode_fn: Callable[[list[Path]], list[list[float]]] | None = None,
 ) -> float:
-    """Cosine similarity of frame's CLIP embedding to the precomputed centroid."""
+    """Mean cosine similarity to the top-K most similar outlier thumbs.
+
+    Why mean(top-K) instead of centroid OR max:
+
+    - **Centroid washes out distinctive signals**: averaging 1352 diverse
+      horror outliers (slasher + possessão + found footage + true crime)
+      gives a vector pointing at "generic horror". A frame near that
+      centroid is near the AVERAGE — which is what passes unnoticed.
+    - **Pure max premia clones**: a frame near a single outlier maxes the
+      score; a frame mildly similar to several distinct winning patterns
+      is penalized. We want the latter.
+    - **mean(top-K)** captures "this frame matches multiple winning
+      structures", robust to single-outlier overfit.
+    """
+    if not outlier_embeddings:
+        return 0.0
     if encode_fn is None:
         from jason.features.embeddings import _default_thumb_encoder  # noqa: PLC0415
         encode_fn = _default_thumb_encoder()
 
-    vec = encode_fn([frame_path])[0]
-    return sum(a * b for a, b in zip(vec, centroid, strict=True))
+    frame_vec = encode_fn([frame_path])[0]
+    sims = [
+        sum(a * b for a, b in zip(frame_vec, emb, strict=True))
+        for emb in outlier_embeddings
+    ]
+    sims.sort(reverse=True)
+    take = sims[: min(top_k, len(sims))]
+    return sum(take) / len(take)
 
 
 def score_frames(
@@ -99,15 +115,20 @@ def score_frames(
     *,
     db_path: Path | None = None,
     theme_id: int | None = None,
+    top_k_similarity: int = 5,
     encode_fn: Callable[[list[Path]], list[list[float]]] | None = None,
 ) -> list[dict[str, Any]]:
-    """For each frame: face_score + outlier_similarity → combined score.
-    Returns list ordered best→worst."""
+    """For each frame: face_score + mean(top-K outlier_similarity) → combined.
+
+    Returns list ordered best→worst. `top_k_similarity` controls how many
+    of the closest outlier thumbnails contribute to the similarity score
+    (default 5 — mean of top-5 cosine sims).
+    """
     settings = get_settings()
     db = db_path or settings.duckdb_path
 
-    centroid = _outlier_centroid(db_path=db, theme_id=theme_id)
-    if centroid is None:
+    outliers = _outlier_embeddings(db_path=db, theme_id=theme_id)
+    if not outliers:
         logger.warning(
             "no outlier thumbnails with percentile >= 90 (theme=%s) — "
             "outlier_similarity will be 0 for all frames", theme_id,
@@ -116,7 +137,14 @@ def score_frames(
     out = []
     for p in frame_paths:
         face = face_score(p)
-        sim = outlier_similarity_for_frame(p, centroid=centroid, encode_fn=encode_fn) if centroid else 0.0
+        sim = (
+            outlier_similarity_for_frame(
+                p, outlier_embeddings=outliers,
+                top_k=top_k_similarity, encode_fn=encode_fn,
+            )
+            if outliers
+            else 0.0
+        )
         combined = 0.4 * face + 0.6 * max(sim, 0.0)
         out.append({
             "path": p,

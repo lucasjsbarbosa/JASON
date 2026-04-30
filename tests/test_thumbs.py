@@ -82,39 +82,64 @@ def test_suggest_overlay_filters_by_theme(tmp_path: Path, monkeypatch: pytest.Mo
 # ---------------------------------------------------------------------------
 
 
-def test_outlier_centroid_returns_none_when_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from jason.thumbs.frame_scorer import _outlier_centroid
+def test_outlier_embeddings_returns_empty_when_no_outliers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from jason.thumbs.frame_scorer import _outlier_embeddings
 
     db = _setup(monkeypatch, tmp_path)
-    assert _outlier_centroid(db_path=db) is None
+    assert _outlier_embeddings(db_path=db) == []
 
 
-def test_outlier_centroid_averages_thumbnails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from jason.thumbs.frame_scorer import _outlier_centroid
+def test_outlier_similarity_uses_mean_top_k(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """mean(top-K) should beat pure-max in distinguishing 'matches several
+    winners' from 'clones one winner'. With K=2:
+      • frame near outlier A only → score ~ avg(0.99, 0.10) ≈ 0.55
+      • frame near A AND B equally → score ~ avg(0.71, 0.71) ≈ 0.71
 
-    db = _setup(monkeypatch, tmp_path)
-    e1 = [1.0] + [0.0] * 511
-    e2 = [0.0] + [1.0] + [0.0] * 510
-    with duckdb.connect(str(db)) as con:
-        con.execute("INSERT OR IGNORE INTO channels (id, title) VALUES (?, ?)", ["UCx", "C"])
-        for vid, emb in [("vid_c001", e1), ("vid_c002", e2)]:
-            con.execute(
-                "INSERT INTO videos (id, channel_id, title, published_at, is_short) "
-                "VALUES (?, ?, ?, ?, ?)",
-                [vid, "UCx", "T", "2026-04-01T00:00:00Z", False],
-            )
-            con.execute(
-                "INSERT INTO video_features (video_id, thumb_embedding) VALUES (?, ?)",
-                [vid, emb],
-            )
-            con.execute(
-                "INSERT INTO outliers (video_id, multiplier, percentile_in_channel) VALUES (?, ?, ?)",
-                [vid, 4.0, 95.0],
-            )
+    Higher score for the latter — exactly what we want."""
+    from jason.thumbs.frame_scorer import outlier_similarity_for_frame
 
-    centroid = _outlier_centroid(db_path=db)
-    assert centroid is not None
-    assert len(centroid) == 512
-    # Mean of [1,0,...] and [0,1,0,...] is [.5,.5,0,...], normalized to [.707,.707,0,...]
-    assert abs(centroid[0] - 0.707) < 0.01
-    assert abs(centroid[1] - 0.707) < 0.01
+    # 3 outlier embeddings: A=[1,0,0], B=[0,1,0], C=[0,0,1] (orthogonal, distinct
+    # winning patterns).
+    outliers = [
+        [1.0, 0.0, 0.0] + [0.0] * 509,
+        [0.0, 1.0, 0.0] + [0.0] * 509,
+        [0.0, 0.0, 1.0] + [0.0] * 509,
+    ]
+
+    # Frame 1: clone of A only (sim with A=1, B=0, C=0)
+    frame1_path = tmp_path / "f1.jpg"
+    frame1_path.write_bytes(b"x")
+    encode_clone_a = lambda paths: [[1.0, 0.0, 0.0] + [0.0] * 509]  # noqa: E731
+    sim1 = outlier_similarity_for_frame(
+        frame1_path, outlier_embeddings=outliers, top_k=2, encode_fn=encode_clone_a,
+    )
+    # mean(top-2 of [1.0, 0.0, 0.0]) = mean(1.0, 0.0) = 0.5
+    assert abs(sim1 - 0.5) < 0.01
+
+    # Frame 2: 45° between A and B (sim with both ~ 0.707)
+    frame2_path = tmp_path / "f2.jpg"
+    frame2_path.write_bytes(b"x")
+    blend = (1 / (2**0.5))
+    encode_blend_ab = lambda paths: [[blend, blend, 0.0] + [0.0] * 509]  # noqa: E731
+    sim2 = outlier_similarity_for_frame(
+        frame2_path, outlier_embeddings=outliers, top_k=2, encode_fn=encode_blend_ab,
+    )
+    # mean(top-2 of [0.707, 0.707, 0]) = 0.707
+    assert sim2 > sim1
+    assert abs(sim2 - 0.707) < 0.01
+
+
+def test_outlier_similarity_returns_zero_when_no_outliers(tmp_path: Path) -> None:
+    from jason.thumbs.frame_scorer import outlier_similarity_for_frame
+
+    p = tmp_path / "f.jpg"
+    p.write_bytes(b"x")
+    encoder = lambda paths: [[1.0] + [0.0] * 511]  # noqa: E731
+    sim = outlier_similarity_for_frame(
+        p, outlier_embeddings=[], top_k=5, encode_fn=encoder,
+    )
+    assert sim == 0.0
