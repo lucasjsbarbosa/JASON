@@ -41,6 +41,11 @@ target-version = "py311"
 select = ["E", "F", "I", "UP", "B", "SIM"]
 ignore = ["E501"]
 
+[tool.ruff.lint.per-file-ignores]
+# Typer's idiom is `typer.Option(...)` in argument defaults; flagging it as
+# B008 is a false positive for every CLI command in this file.
+"src/jason/cli.py" = ["B008"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

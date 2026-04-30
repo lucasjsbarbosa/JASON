@@ -92,8 +92,31 @@ def ingest_channels(
     ids: str = typer.Option(..., "--ids", help="Comma-separated channel IDs (UC...)."),
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
-    """Ingest channels + their videos by channel ID."""
-    raise typer.Exit(_not_yet("ingest channels", "Phase 1"))
+    """Ingest channels + their videos by channel ID (writes initial snapshot)."""
+    from jason.ingestion.youtube_data import ingest_channel
+
+    channel_ids = [s.strip() for s in ids.split(",") if s.strip()]
+    if not channel_ids:
+        typer.echo("no channel ids provided", err=True)
+        raise typer.Exit(1)
+
+    if dry_run:
+        typer.echo(f"[dry-run] would ingest {len(channel_ids)} channel(s):")
+        for cid in channel_ids:
+            typer.echo(f"  - {cid}")
+        raise typer.Exit(0)
+
+    for cid in channel_ids:
+        try:
+            result = ingest_channel(cid)
+        except Exception as exc:
+            typer.secho(f"  {cid} FAILED: {exc}", fg=typer.colors.RED, err=True)
+            continue
+        typer.secho(
+            f"  {cid}: {result['video_count']} videos, {result['snapshot_count']} snapshots "
+            f"-> {result['raw_dump_path']}",
+            fg=typer.colors.GREEN,
+        )
 
 
 @ingest_app.command("neighbors")
