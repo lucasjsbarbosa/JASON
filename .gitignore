@@ -50,3 +50,10 @@ src/jason/models/artifacts/bertopic_*
 .DS_Store
 Thumbs.db
 *:Zone.Identifier
+
+# --- Next.js / Node.js ----
+apps/web/node_modules/
+apps/web/.next/
+apps/web/.turbo/
+apps/web/out/
+apps/web/.env*.local

@@ -1,0 +1,107 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Special+Elite&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --bg: #0E0E0E;
+  --surface: #141414;
+  --surface-2: #1A1A1A;
+  --border: #2A2A2A;
+  --text: #E8E5DE;
+  --muted: #888880;
+  --accent: #B11C19;
+  --gold: #D4AF37;
+  --hot-up: #5BC076;
+  --hot-down: #B11C19;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-gold: var(--gold);
+  --font-display: "Special Elite", "Courier New", monospace;
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Courier New", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--text); }
+
+::selection {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+button, input, select, textarea {
+  font-family: inherit;
+  border-radius: 0;
+}
+
+/* Sharp-corner utilities */
+.no-radius { border-radius: 0 !important; }
+
+/* Pills */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.18rem 0.6rem;
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  color: var(--text);
+}
+.pill-hot { border-color: var(--accent); color: var(--accent); }
+.pill-mid { border-color: var(--gold); color: var(--gold); }
+
+/* Card */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 1rem 1.2rem;
+}
+
+/* Top divider */
+.mast {
+  border-bottom: 2px solid var(--accent);
+  padding: 1.5rem 2rem 1rem 2rem;
+}
+.mast-name {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  letter-spacing: 0.16em;
+  color: var(--text);
+}
+.mast-sub {
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+  text-transform: uppercase;
+}

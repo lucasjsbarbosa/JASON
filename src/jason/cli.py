@@ -783,6 +783,17 @@ def thumbs_suggest(
     typer.echo(json.dumps(overlay, ensure_ascii=False, indent=2))
 
 
+@app.command("api")
+def api(
+    host: str = typer.Option("0.0.0.0", help="Host (0.0.0.0 expõe na rede)."),
+    port: int = typer.Option(8000, help="Port pra FastAPI."),
+    reload: bool = typer.Option(True, help="Recarrega no save (dev)."),
+) -> None:
+    """Sobe FastAPI backend (a UI nova consome via Next.js em apps/web/)."""
+    import uvicorn  # noqa: PLC0415
+    uvicorn.run("jason.api.main:app", host=host, port=port, reload=reload)
+
+
 @app.command("dashboard")
 def dashboard(
     port: int = typer.Option(8501, help="Port for the Streamlit server."),

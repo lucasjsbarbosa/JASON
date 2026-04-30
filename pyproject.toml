@@ -19,6 +19,8 @@ dependencies = [
     "google-auth>=2.34",
     "google-auth-oauthlib>=1.2",
     "google-api-python-client>=2.140",
+    "fastapi>=0.136.1",
+    "uvicorn>=0.46.0",
 ]
 
 [project.scripts]
