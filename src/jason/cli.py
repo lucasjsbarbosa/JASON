@@ -130,6 +130,46 @@ def ingest_neighbors(
     raise typer.Exit(_not_yet("ingest neighbors", "Phase 1"))
 
 
+@ingest_app.command("thumbnails")
+def ingest_thumbnails(
+    channel: str | None = typer.Option(
+        None, "--channel", "-c",
+        help="Limit to a single channel (UC...). Default: all known videos.",
+    ),
+    force: bool = typer.Option(False, "--force", help="Re-download even if file exists."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Count what would be fetched."),
+) -> None:
+    """Download maxres thumbnails for known videos to data/thumbnails/."""
+    import duckdb
+
+    settings = get_settings()
+
+    if dry_run:
+        with duckdb.connect(str(settings.duckdb_path)) as con:
+            sql = "SELECT COUNT(*) FROM videos WHERE thumbnail_url IS NOT NULL"
+            params = []
+            if channel:
+                sql += " AND channel_id = ?"
+                params.append(channel)
+            count = con.execute(sql, params).fetchone()[0]
+        typer.echo(
+            f"[dry-run] would consider {count} thumbnail(s)"
+            + (f" for channel {channel}" if channel else "")
+            + (" (force)" if force else " (skipping existing)")
+        )
+        raise typer.Exit(0)
+
+    from jason.ingestion.thumbnails import download_all
+
+    result = download_all(channel_id=channel, force=force)
+    typer.secho(
+        f"thumbnails: {result['downloaded']} downloaded, "
+        f"{result['skipped']} skipped, {result['failed']} failed "
+        f"(of {result['requested']} requested)",
+        fg=typer.colors.GREEN if result["failed"] == 0 else typer.colors.YELLOW,
+    )
+
+
 @ingest_app.command("resolve-handles")
 def ingest_resolve_handles(
     file: Path = typer.Option(
