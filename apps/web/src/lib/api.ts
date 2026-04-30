@@ -72,3 +72,16 @@ export type ThemeCoverage = {
   niche_avg_mult: number | null;
   niche_top_mult: number | null;
 };
+
+export type SuggestCandidate = {
+  title: string;
+  multiplier: number | null;
+  multiplier_human: string | null;
+  contributions: ScoreContribution[];
+};
+
+export type SuggestResponse = {
+  candidates: SuggestCandidate[];
+  rag_outlier_count: number;
+  model_trained: boolean;
+};

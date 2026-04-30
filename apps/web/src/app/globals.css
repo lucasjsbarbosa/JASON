@@ -1,5 +1,7 @@
-@import "tailwindcss";
+/* Google Fonts must come before tailwind's @import (CSS spec: @import rules
+   must precede all other rules besides @charset/@layer). */
 @import url('https://fonts.googleapis.com/css2?family=Special+Elite&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
 
 :root {
   --bg: #0E0E0E;

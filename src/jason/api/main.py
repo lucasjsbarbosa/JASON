@@ -119,6 +119,27 @@ class ScoreResponse(BaseModel):
     contributions: list[ScoreContribution]
 
 
+class SuggestRequest(BaseModel):
+    transcript: str
+    channel_id: str | None = None
+    theme: str | None = None
+    num_candidates: int = Field(default=10, ge=3, le=20)
+    duration_min: float = Field(default=40.0, ge=1.0, le=180.0)
+
+
+class SuggestCandidate(BaseModel):
+    title: str
+    multiplier: float | None = None
+    multiplier_human: str | None = None
+    contributions: list[ScoreContribution] = Field(default_factory=list)
+
+
+class SuggestResponse(BaseModel):
+    candidates: list[SuggestCandidate]
+    rag_outlier_count: int
+    model_trained: bool
+
+
 # --- endpoints -----------------------------------------------------------
 
 
@@ -355,6 +376,76 @@ def themes_coverage() -> list[ThemeCoverage]:
             niche_top_mult=float(r[6]) if r[6] is not None else None,
         ))
     return out
+
+
+@app.post("/api/suggest", response_model=SuggestResponse)
+def suggest(req: SuggestRequest) -> SuggestResponse:
+    """Gera N candidatos via Claude (RAG sobre outliers do nicho), ranqueia
+    pelo modelo se treinado, devolve com explicação humanizada."""
+    from jason.dashboard.humanize import humanize_contribution
+    from jason.generation.titles import generate_titles
+    from jason.models.predict import score_title_with_explanation
+
+    settings = get_settings()
+    channel_id = req.channel_id or settings.own_channel_id
+    duration_s = int(req.duration_min * 60)
+
+    if not req.transcript.strip():
+        raise HTTPException(status_code=400, detail="Transcrição vazia.")
+
+    try:
+        gen = generate_titles(
+            req.transcript,
+            channel_id=channel_id,
+            theme=req.theme or None,
+            num_candidates=req.num_candidates,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=502,
+            detail=f"Erro chamando Claude: {exc}",
+        ) from exc
+
+    candidates: list[SuggestCandidate] = []
+    model_trained = True
+    for t in gen["titles"]:
+        try:
+            s = score_title_with_explanation(
+                t, channel_id, duration_s=duration_s, top_k=4,
+            )
+        except FileNotFoundError:
+            model_trained = False
+            candidates.append(SuggestCandidate(title=t))
+            continue
+
+        mult = float(s["multiplier"])
+        contribs: list[ScoreContribution] = []
+        for c in s["contributions"]:
+            h = humanize_contribution(c)
+            contribs.append(ScoreContribution(
+                feature=c["feature"],
+                label=h["label"],
+                value=h["value"],
+                contribution=float(c["contribution"]),
+                direction=c["direction"],
+                verb=h["verb"],
+                color=h["color"],
+            ))
+        candidates.append(SuggestCandidate(
+            title=t,
+            multiplier=mult,
+            multiplier_human=humanize_multiplier(mult),
+            contributions=contribs,
+        ))
+
+    if model_trained:
+        candidates.sort(key=lambda c: -(c.multiplier or 0))
+
+    return SuggestResponse(
+        candidates=candidates,
+        rag_outlier_count=len(gen.get("outlier_ids", []) or []),
+        model_trained=model_trained,
+    )
 
 
 def _data_dir() -> Path:
