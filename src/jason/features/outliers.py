@@ -140,6 +140,101 @@ def compute_multiplier(
     }
 
 
+def compute_multiplier_live(
+    channel_id: str,
+    *,
+    db_path: Path | None = None,
+    min_age_days: int = 60,
+    baseline_n: int = 30,
+    min_baseline: int = 10,
+) -> dict[str, Any]:
+    """Compute multiplier from the latest available snapshot.
+
+    Trade-off vs `compute_multiplier`: this uses each video's most recent
+    `views` directly instead of the 28-day cohort. Cheaper to run (no
+    snapshot history needed) but biased toward older videos which had more
+    time to accumulate views. We mitigate by:
+
+      * Filtering to videos with `days_since_publish >= min_age_days` (default
+        60) so the bias mostly stabilizes.
+      * Comparing intra-channel against the immediately preceding 30 siblings
+        — the bias is approximately constant within that local window.
+
+    Useful as a bootstrap before `compute_multiplier`'s 28-day cohort signal
+    becomes available; switch back to the cohort method once snapshot history
+    is mature.
+
+    Skipped (no row written):
+        * Shorts.
+        * Videos younger than `min_age_days`.
+        * Videos with no snapshot or zero views.
+        * Videos with fewer than `min_baseline` prior eligible siblings.
+    """
+    settings = get_settings()
+    db = db_path or settings.duckdb_path
+
+    with duckdb.connect(str(db)) as con:
+        total_videos = con.execute(
+            "SELECT count(*) FROM videos WHERE channel_id = ? AND is_short = false",
+            [channel_id],
+        ).fetchone()[0]
+
+        rows = con.execute(
+            """
+            WITH latest AS (
+                SELECT video_id, MAX(captured_at) AS captured_at
+                FROM video_stats_snapshots
+                GROUP BY video_id
+            )
+            SELECT v.id, v.published_at, s.views
+            FROM videos v
+            JOIN latest l ON l.video_id = v.id
+            JOIN video_stats_snapshots s
+              ON s.video_id = l.video_id AND s.captured_at = l.captured_at
+            WHERE v.channel_id = ?
+              AND v.is_short = false
+              AND DATE_DIFF('day', v.published_at, now()) >= ?
+              AND s.views IS NOT NULL AND s.views > 0
+            ORDER BY v.published_at
+            """,
+            [channel_id, min_age_days],
+        ).fetchall()
+
+        eligible = [(vid, pub, int(views)) for vid, pub, views in rows]
+
+        computed = 0
+        skipped_baseline = 0
+        for i, (vid, _pub, views) in enumerate(eligible):
+            baseline = [e[2] for e in eligible[max(0, i - baseline_n):i]]
+            if len(baseline) < min_baseline:
+                skipped_baseline += 1
+                continue
+            median = statistics.median(baseline)
+            if median <= 0:
+                continue
+            mult = views / median
+            con.execute(
+                """
+                INSERT INTO outliers (video_id, multiplier, computed_at)
+                VALUES (?, ?, now())
+                ON CONFLICT (video_id) DO UPDATE SET
+                    multiplier = EXCLUDED.multiplier,
+                    computed_at = now()
+                """,
+                [vid, mult],
+            )
+            computed += 1
+
+    return {
+        "channel_id": channel_id,
+        "total_videos": total_videos,
+        "eligible": len(eligible),
+        "computed": computed,
+        "skipped_no_baseline": skipped_baseline,
+        "skipped_too_young_or_no_snapshot": total_videos - len(eligible),
+    }
+
+
 def compute_percentile(
     channel_id: str,
     *,

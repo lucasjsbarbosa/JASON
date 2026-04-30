@@ -507,25 +507,44 @@ def features_outliers(
     target_days: int = typer.Option(28, "--target-days", help="Age (days) for views_at_age."),
     window_days: int = typer.Option(90, "--window-days", help="Window for intra-channel percentile."),
     skip_percentile: bool = typer.Option(False, "--skip-percentile", help="Only compute multipliers."),
+    live: bool = typer.Option(
+        False, "--live",
+        help="Use latest snapshot directly (bootstrap mode, before 28d cohort matures).",
+    ),
+    min_age_days: int = typer.Option(
+        60, "--min-age-days",
+        help="Minimum video age in --live mode (filters out unstabilized videos).",
+    ),
 ) -> None:
     """Compute outlier multipliers + intra-channel percentiles per video."""
     import duckdb
 
-    from jason.features.outliers import compute_multiplier, compute_percentile
+    from jason.features.outliers import (
+        compute_multiplier,
+        compute_multiplier_live,
+        compute_percentile,
+    )
 
     settings = get_settings()
     if channel:
         targets = [channel]
     else:
-        with duckdb.connect(str(settings.duckdb_path)) as con:
+        with duckdb.connect(str(settings.duckdb_path), read_only=True) as con:
             targets = [r[0] for r in con.execute("SELECT id FROM channels").fetchall()]
 
     for cid in targets:
-        m = compute_multiplier(cid, target_days=target_days)
+        if live:
+            m = compute_multiplier_live(cid, min_age_days=min_age_days)
+            skipped_label = "too_young_or_no_snapshot"
+            skipped_count = m["skipped_too_young_or_no_snapshot"]
+        else:
+            m = compute_multiplier(cid, target_days=target_days)
+            skipped_label = "age_data"
+            skipped_count = m["skipped_no_age_data"]
         msg = (
             f"  {cid}: total={m['total_videos']} eligible={m['eligible']} "
             f"computed={m['computed']} skipped(baseline)={m['skipped_no_baseline']} "
-            f"skipped(age_data)={m['skipped_no_age_data']}"
+            f"skipped({skipped_label})={skipped_count}"
         )
         typer.secho(msg, fg=typer.colors.GREEN if m["computed"] else typer.colors.YELLOW)
 
