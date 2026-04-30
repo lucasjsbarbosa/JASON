@@ -17,6 +17,12 @@ import pandas as pd
 import streamlit as st
 
 from jason.config import get_settings
+from jason.dashboard.humanize import (
+    humanize_contribution,
+    humanize_multiplier,
+    humanize_percentile,
+    humanize_topic_label,
+)
 
 st.set_page_config(
     page_title="JASON",
@@ -154,13 +160,15 @@ hr { border: 0; border-top: 1px solid #2A2A2A; margin: 1.5rem 0; }
 
 .jason-pill {
     display: inline-block;
-    padding: 0.15rem 0.5rem;
+    padding: 0.18rem 0.6rem;
     border: 1px solid #2A2A2A;
     color: #E8E5DE;
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.72rem;
     letter-spacing: 0.05em;
-    margin-right: 0.4rem;
+    margin: 0.18rem 0.35rem 0.18rem 0;
+    line-height: 1.4;
+    white-space: nowrap;
 }
 .jason-pill-hot { border-color: #B11C19; color: #B11C19; }
 .jason-pill-mid { border-color: #D4AF37; color: #D4AF37; }
@@ -197,6 +205,20 @@ def _multiplier_pill(mult: float) -> str:
     if mult >= 1.5:
         return _pill(f"{mult:.1f}x", "mid")
     return _pill(f"{mult:.1f}x")
+
+
+def _is_meaningful(value: object) -> bool:
+    """True quando o valor não é nan / None / '-1' / string vazia.
+    Usado pra esconder rótulos sem informação real (theme_label nan, franchise -1)."""
+    if value is None:
+        return False
+    try:
+        if pd.isna(value):
+            return False
+    except (TypeError, ValueError):
+        pass
+    s = str(value).strip().lower()
+    return s not in ("", "nan", "none", "-1")
 
 
 # --- tabs ----------------------------------------------------------------
@@ -262,15 +284,17 @@ def _tab_outliers() -> None:
             st.markdown(f"**[{row['channel']}]** {row['title']}")
             pills = ""
             if row["pct"]:
-                pills += _pill(f"p{row['pct']:.0f}", "hot" if row["pct"] >= 95 else "mid")
+                pills += _pill(humanize_percentile(row["pct"]), "hot" if row["pct"] >= 95 else "mid")
             if row["mult"]:
-                pills += _multiplier_pill(row["mult"])
+                pills += _pill(humanize_multiplier(row["mult"]), "hot" if row["mult"] >= 3 else "mid")
             if row["views"]:
-                pills += _pill(f"{int(row['views']):,} v")
-            if row.get("theme_label"):
-                pills += _pill(f"theme: {row['theme_label']}")
-            if row.get("franchise_label"):
-                pills += _pill(f"franchise: {row['franchise_label']}")
+                pills += _pill(f"{int(row['views']):,} views")
+            ct = humanize_topic_label(row.get("theme_label"))
+            if ct:
+                pills += _pill(f"subgênero: {ct}")
+            cf = humanize_topic_label(row.get("franchise_label"))
+            if cf:
+                pills += _pill(f"franquia: {cf}")
             st.markdown(pills, unsafe_allow_html=True)
             st.markdown(f"[abrir no YouTube ↗](https://youtu.be/{row['id']})")
 
@@ -319,7 +343,13 @@ def _tab_own_performance() -> None:
     st.markdown("---")
 
     # Outlier ranking — own channel, top by multiplier
-    st.subheader("Teus outliers")
+    st.subheader("Vídeos que mais bombaram (relativos ao próprio canal)")
+    st.caption(
+        "Ordenado pela razão `views do vídeo ÷ mediana do canal naquele período`. "
+        "Por isso um vídeo de 2k views pode aparecer acima de um de 20k — se "
+        "os vídeos vizinhos tinham views maiores, o de 20k foi só normal pro "
+        "canal naquele momento."
+    )
     own_outliers = con.execute(
         """
         SELECT v.id, v.title, v.published_at, v.thumbnail_url,
@@ -340,28 +370,47 @@ def _tab_own_performance() -> None:
     ).df()
 
     if own_outliers.empty:
-        st.info("Sem multiplier calculado pros teus vídeos ainda. "
-                "Rode `jason features outliers --live`.")
+        st.info(
+            "Comparação intra-canal ainda não calculada. "
+            "Rode `jason features outliers --live`."
+        )
     else:
-        for _, row in own_outliers.iterrows():
+        for rank, (_, row) in enumerate(own_outliers.iterrows(), start=1):
             cols = st.columns([1, 4])
             with cols[0]:
                 if row.get("thumbnail_url"):
                     st.image(row["thumbnail_url"], width=140)
+                else:
+                    st.markdown(
+                        f"<div style='font-family:Special Elite;font-size:2.2rem;"
+                        f"color:#888880;text-align:center;padding-top:1rem'>#{rank:02d}</div>",
+                        unsafe_allow_html=True,
+                    )
             with cols[1]:
-                st.markdown(f"**{row['title']}**")
-                pills = _multiplier_pill(row["multiplier"])
+                st.markdown(f"**#{rank:02d} · {row['title']}**")
+                pills = _pill(
+                    humanize_multiplier(row["multiplier"]),
+                    "hot" if row["multiplier"] >= 3 else "mid",
+                )
                 if row["percentile_in_channel"]:
                     pct = row["percentile_in_channel"]
-                    pills += _pill(f"p{pct:.0f}", "hot" if pct >= 95 else "mid")
+                    pills += _pill(
+                        humanize_percentile(pct), "hot" if pct >= 95 else "mid",
+                    )
                 if row["views"]:
-                    pills += _pill(f"{int(row['views']):,} v")
-                if row.get("theme_label"):
-                    pills += _pill(f"theme: {row['theme_label']}")
+                    pills += _pill(f"{int(row['views']):,} views")
+                clean_theme = humanize_topic_label(row.get("theme_label"))
+                if clean_theme:
+                    pills += _pill(f"subgênero: {clean_theme}")
+                clean_fr = humanize_topic_label(row.get("franchise_label"))
+                if clean_fr:
+                    pills += _pill(f"franquia: {clean_fr}")
                 st.markdown(pills, unsafe_allow_html=True)
                 st.markdown(
-                    f"<span style='color:#888880'>{row['published_at'].strftime('%Y-%m-%d')} · "
-                    f"<a href='https://youtu.be/{row['id']}'>↗</a></span>",
+                    f"<span style='color:#888880;font-size:0.78rem'>"
+                    f"{row['published_at'].strftime('%d/%m/%Y')} · "
+                    f"<a href='https://youtu.be/{row['id']}'>abrir no YouTube ↗</a>"
+                    f"</span>",
                     unsafe_allow_html=True,
                 )
 
@@ -521,18 +570,26 @@ def _tab_own_performance() -> None:
 
 
 def _tab_title_scorer() -> None:
-    st.header("Title scorer")
-    st.caption("Score de um título candidato pelo regressor da Fase 3.")
+    st.header("Avaliar um título")
+    st.caption(
+        "Cola um título e veja a previsão de quanto ele performaria em "
+        "comparação com a média do canal. Mostra também o que ajudou ou "
+        "atrapalhou a previsão."
+    )
 
     settings = get_settings()
-    title = st.text_input("Título candidato", "FINAL EXPLICADO de Hereditário (2018)")
-    channel = st.text_input("Channel ID (UC...)", settings.own_channel_id)
+    title = st.text_input("Título do vídeo", "FINAL EXPLICADO de Hereditário (2018)")
     duration_min = st.number_input(
-        "Duração estimada (minutos)", min_value=1.0, max_value=180.0, value=40.0, step=1.0,
-        help="O canal foca em análises longas (~30–50 min). Convertido pra segundos antes do score.",
+        "Duração estimada do vídeo (minutos)",
+        min_value=1.0, max_value=180.0, value=40.0, step=1.0,
+        help="Análises longas (30–50 min) costumam performar melhor no nicho.",
     )
     duration_s = int(duration_min * 60)
-    st.caption(f"= {duration_s}s")
+    with st.expander("opções avançadas"):
+        channel = st.text_input(
+            "ID do canal (UC...)", settings.own_channel_id,
+            help="Default: o canal próprio. Mude se quiser scoring contra outro canal.",
+        )
 
     if st.button("Score"):
         try:
@@ -542,27 +599,27 @@ def _tab_title_scorer() -> None:
             )
             c1, c2 = st.columns([1, 2])
             with c1:
-                st.metric("Multiplier predito", f"{r['multiplier']:.2f}x")
-                st.caption(f"log_multiplier = {r['log_multiplier']:.4f}")
-                st.caption(f"base value = {r['base_value']:.3f}")
+                st.metric("Comparado à média do canal", f"{r['multiplier']:.2f}x")
+                st.caption(humanize_multiplier(r["multiplier"]))
             with c2:
                 st.markdown("**Por que esse score?**")
                 st.caption(
-                    "Contribuição de cada feature pra log_multiplier "
-                    "(SHAP-like via LightGBM). Verde = empurrou pra cima, vermelho = pra baixo."
+                    "O que ajudou (verde) ou atrapalhou (vermelho) a previsão "
+                    "deste título, em ordem de importância."
                 )
                 for c in r["contributions"]:
-                    color = "#5BC076" if c["direction"] == "up" else "#B11C19"
+                    h = humanize_contribution(c)
                     arrow = "▲" if c["direction"] == "up" else "▼"
                     st.markdown(
-                        f"<div style='display:flex;gap:0.6rem;align-items:center;"
-                        f"padding:0.25rem 0;border-bottom:1px solid #2A2A2A'>"
-                        f"<div style='color:{color};font-family:JetBrains Mono;width:5rem'>"
-                        f"{arrow} {c['contribution']:+.3f}</div>"
-                        f"<div style='font-family:JetBrains Mono;color:#E8E5DE;flex:1'>"
-                        f"{c['feature']}</div>"
-                        f"<div style='color:#888880;font-family:JetBrains Mono'>"
-                        f"= {c['value']}</div>"
+                        f"<div style='display:flex;gap:0.8rem;align-items:center;"
+                        f"padding:0.4rem 0;border-bottom:1px solid #1F1F1F'>"
+                        f"<div style='color:{h['color']};width:1rem;text-align:center'>"
+                        f"{arrow}</div>"
+                        f"<div style='flex:1'>"
+                        f"<div style='color:#E8E5DE'>{h['label']}</div>"
+                        f"<div style='color:#888880;font-size:0.78rem'>"
+                        f"valor: {h['value']} · {h['verb']}"
+                        f"</div></div>"
                         f"</div>",
                         unsafe_allow_html=True,
                     )
@@ -616,15 +673,17 @@ def _tab_suggest_title() -> None:
                 st.info("Modelo ainda não treinado — exibindo sem score.")
 
             st.subheader("Candidatos")
+            st.caption("Ordenados pelo previsto. ▲ verde = ajudou · ▼ vermelho = atrapalhou.")
             for i, item in enumerate(scored, start=1):
                 t, mult, contribs = item
-                pill = _multiplier_pill(mult) if mult else _pill("—")
+                pill_text = humanize_multiplier(mult) if mult else "sem score"
+                kind = "hot" if mult and mult >= 3 else ("mid" if mult and mult >= 1.5 else "")
                 with st.container():
                     st.markdown(
                         f"<div style='display:flex;gap:0.8rem;align-items:center;"
                         f"padding:0.6rem 0 0.3rem 0'>"
                         f"<div style='font-family:JetBrains Mono;color:#888880;width:1.5rem'>{i:02d}</div>"
-                        f"<div>{pill}</div>"
+                        f"<div>{_pill(pill_text, kind)}</div>"
                         f"<div style='flex:1;font-size:1rem'>{t}</div>"
                         f"</div>",
                         unsafe_allow_html=True,
@@ -632,16 +691,17 @@ def _tab_suggest_title() -> None:
                     if contribs:
                         with st.expander("por quê?"):
                             for c in contribs:
-                                color = "#5BC076" if c["direction"] == "up" else "#B11C19"
+                                h = humanize_contribution(c)
                                 arrow = "▲" if c["direction"] == "up" else "▼"
                                 st.markdown(
                                     f"<div style='display:flex;gap:0.6rem;"
-                                    f"font-family:JetBrains Mono;font-size:0.82rem;"
-                                    f"padding:0.15rem 0'>"
-                                    f"<span style='color:{color};width:5rem'>"
-                                    f"{arrow} {c['contribution']:+.3f}</span>"
-                                    f"<span style='flex:1'>{c['feature']}</span>"
-                                    f"<span style='color:#888880'>= {c['value']}</span>"
+                                    f"align-items:center;padding:0.2rem 0'>"
+                                    f"<span style='color:{h['color']};width:1rem;"
+                                    f"text-align:center'>{arrow}</span>"
+                                    f"<span style='flex:1'>{h['label']}"
+                                    f" <span style='color:#888880;font-size:0.78rem'>"
+                                    f"({h['value']} · {h['verb']})"
+                                    f"</span></span>"
                                     f"</div>",
                                     unsafe_allow_html=True,
                                 )
@@ -703,14 +763,18 @@ finalizada (escopo explode com qualidade inconsistente).
         st.info("Sem outliers por tema ainda. Rode `jason features outliers --live`.")
         return
 
-    theme_choice = st.selectbox(
-        "Tema",
-        ["(escolha)"] + [f"{r['theme_label']} ({r['n_outliers']} outliers)" for _, r in themes.iterrows()],
-    )
+    # Map clean→raw for selectbox label
+    options = []
+    label_map: dict[str, str] = {}
+    for _, r in themes.iterrows():
+        clean = humanize_topic_label(r["theme_label"]) or r["theme_label"]
+        display = f"{clean} · {r['n_outliers']} outliers"
+        options.append(display)
+        label_map[display] = r["theme_label"]
+    theme_choice = st.selectbox("Subgênero", ["(escolha)"] + options)
     if theme_choice == "(escolha)":
         return
-
-    label = theme_choice.split(" (")[0]
+    label = label_map[theme_choice]
     samples = con.execute(
         """
         SELECT v.id, v.title, c.title AS channel, v.thumbnail_url, o.multiplier
@@ -764,10 +828,11 @@ finalizada (escopo explode com qualidade inconsistente).
         with cols[i % 3]:
             if row.get("thumbnail_url"):
                 st.image(row["thumbnail_url"], use_container_width=True)
-            st.caption(
-                f"{_multiplier_pill(row['multiplier'])} "
-                f"<span style='color:#888880'>[{row['channel']}]</span><br>"
+            st.markdown(
+                f"{_pill(humanize_multiplier(row['multiplier']), 'hot' if row['multiplier'] >= 3 else 'mid')} "
+                f"<span style='color:#888880;font-size:0.78rem'>[{row['channel']}]</span><br>"
                 f"<span style='font-size:0.85rem'>{row['title'][:80]}</span>",
+                unsafe_allow_html=True,
             )
             st.markdown(
                 f"<div style='font-family:JetBrains Mono;font-size:0.75rem;color:#888880'>"
