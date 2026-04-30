@@ -130,6 +130,55 @@ def ingest_neighbors(
     raise typer.Exit(_not_yet("ingest neighbors", "Phase 1"))
 
 
+@ingest_app.command("transcripts")
+def ingest_transcripts(
+    audio_dir: Path = typer.Option(
+        ..., "--audio-dir", "-a",
+        help="Directory containing {video_id}.{ext} audio files (.m4a/.mp3/.wav/etc).",
+    ),
+    channel: str | None = typer.Option(
+        None, "--channel", "-c",
+        help="Only transcribe videos from this channel (UC...).",
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Count what would be transcribed."),
+) -> None:
+    """Transcribe audio files for known videos via faster-whisper (PT-BR)."""
+    if dry_run:
+        import duckdb
+
+        from jason.ingestion.transcripts import _resolve_audio_for
+
+        settings = get_settings()
+        with duckdb.connect(str(settings.duckdb_path)) as con:
+            sql = "SELECT id FROM videos"
+            params: list = []
+            if channel:
+                sql += " WHERE channel_id = ?"
+                params.append(channel)
+            rows = con.execute(sql, params).fetchall()
+
+        out_dir = settings.data_dir / "transcripts"
+        with_audio = sum(1 for (vid,) in rows if _resolve_audio_for(vid, audio_dir))
+        already_done = sum(1 for (vid,) in rows if (out_dir / f"{vid}.json").exists())
+        typer.echo(
+            f"[dry-run] {len(rows)} candidate video(s); "
+            f"{with_audio} have audio in {audio_dir}; "
+            f"{already_done} already transcribed"
+        )
+        raise typer.Exit(0)
+
+    from jason.ingestion.transcripts import transcribe_pending
+
+    result = transcribe_pending(audio_dir, channel_id=channel)
+    typer.secho(
+        f"transcripts: {result['transcribed']} done, "
+        f"{result['skipped']} already done, "
+        f"{result['no_audio']} missing audio "
+        f"(of {result['requested']} candidates)",
+        fg=typer.colors.GREEN,
+    )
+
+
 @ingest_app.command("thumbnails")
 def ingest_thumbnails(
     channel: str | None = typer.Option(

@@ -32,6 +32,11 @@ dev = [
     "respx>=0.23.1",
     "ruff>=0.6",
 ]
+# Optional ML stack (transcription, embeddings, etc.). Install with:
+#   uv sync --group ml
+ml = [
+    "faster-whisper>=1.1",
+]
 
 [tool.ruff]
 line-length = 100
