@@ -178,19 +178,43 @@ def generate_titles(
         from anthropic import Anthropic  # noqa: PLC0415
         client = Anthropic(api_key=settings.anthropic_api_key)
 
+    # Default ephemeral TTL is 5 min — useless for our cadence (one suggestion
+    # per video, weekly/biweekly), so the cached prefix would never be hit.
+    # The 1h TTL extension (beta header below) gives a realistic chance at
+    # cache hits when the user generates 2-3 variants in the same hour. Cost
+    # estimate "cache hit ≈ 1/10 of first call" only applies inside that
+    # window — single-shot weekly use should always cost first-call price.
     response = client.messages.create(
         model=settings.anthropic_model,
         max_tokens=2048,
         system=[
-            {"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}},
-            {"type": "text", "text": static_prefix, "cache_control": {"type": "ephemeral"}},
+            {
+                "type": "text", "text": SYSTEM_PROMPT,
+                "cache_control": {"type": "ephemeral", "ttl": "1h"},
+            },
+            {
+                "type": "text", "text": static_prefix,
+                "cache_control": {"type": "ephemeral", "ttl": "1h"},
+            },
         ],
         messages=[{"role": "user", "content": user_msg}],
+        extra_headers={"anthropic-beta": "extended-cache-ttl-2025-04-11"},
     )
 
     response_text = "".join(
         block.text for block in response.content if hasattr(block, "text")
     )
+
+    usage = getattr(response, "usage", None)
+    if usage is not None:
+        logger.info(
+            "claude usage: in=%s cache_create=%s cache_read=%s out=%s",
+            getattr(usage, "input_tokens", None),
+            getattr(usage, "cache_creation_input_tokens", None),
+            getattr(usage, "cache_read_input_tokens", None),
+            getattr(usage, "output_tokens", None),
+        )
+
     titles = _parse_titles(response_text)
 
     if len(titles) > num_candidates:
