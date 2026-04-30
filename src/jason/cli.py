@@ -23,11 +23,13 @@ app = typer.Typer(
 
 db_app = typer.Typer(help="Manage the local DuckDB warehouse.", no_args_is_help=True)
 ingest_app = typer.Typer(help="Pull data from YouTube + TMDb (Phase 1).", no_args_is_help=True)
+snapshot_app = typer.Typer(help="Run periodic stats snapshots (Phase 1).", no_args_is_help=True)
 features_app = typer.Typer(help="Compute outlier multipliers, embeddings, topics (Phase 2).", no_args_is_help=True)
 model_app = typer.Typer(help="Train and score the title-multiplier regressor (Phase 3).", no_args_is_help=True)
 
 app.add_typer(db_app, name="db")
 app.add_typer(ingest_app, name="ingest")
+app.add_typer(snapshot_app, name="snapshot")
 app.add_typer(features_app, name="features")
 app.add_typer(model_app, name="model")
 
@@ -175,6 +177,47 @@ def ingest_resolve_handles(
             encoding="utf-8",
         )
         typer.echo(f"wrote {output}")
+
+
+# --- snapshot (Phase 1) ------------------------------------------------------
+
+
+@snapshot_app.command("run")
+def snapshot_run(
+    channel: str | None = typer.Option(
+        None, "--channel", "-c",
+        help="Limit snapshot to a single channel (UC...). Default: all known videos.",
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="List how many videos would be hit."),
+) -> None:
+    """Append a fresh row to video_stats_snapshots for every known video."""
+    import duckdb
+
+    settings = get_settings()
+
+    if dry_run:
+        with duckdb.connect(str(settings.duckdb_path)) as con:
+            if channel:
+                count = con.execute(
+                    "SELECT COUNT(*) FROM videos WHERE channel_id = ?", [channel]
+                ).fetchone()[0]
+            else:
+                count = con.execute("SELECT COUNT(*) FROM videos").fetchone()[0]
+        typer.echo(
+            f"[dry-run] would snapshot {count} video(s)"
+            + (f" for channel {channel}" if channel else "")
+        )
+        raise typer.Exit(0)
+
+    from jason.ingestion.stats_snapshot import snapshot_all
+
+    result = snapshot_all(channel_id=channel)
+    typer.secho(
+        f"snapshot done at {result['captured_at'].isoformat()}: "
+        f"{result['snapshotted']}/{result['requested']} videos "
+        f"({result['missing']} missing)",
+        fg=typer.colors.GREEN if result["missing"] == 0 else typer.colors.YELLOW,
+    )
 
 
 # --- features (Phase 2) ------------------------------------------------------
