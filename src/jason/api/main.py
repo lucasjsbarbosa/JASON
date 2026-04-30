@@ -12,8 +12,9 @@ from pathlib import Path
 from typing import Any
 
 import duckdb
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from jason.config import get_settings
@@ -55,6 +56,13 @@ class HealthResponse(BaseModel):
     status: str = "ok"
     db_path: str
     own_channel_id: str
+
+
+class Channel(BaseModel):
+    id: str
+    title: str
+    handle: str | None = None
+    subs: int | None = None
 
 
 class OutlierVideo(BaseModel):
@@ -150,6 +158,18 @@ def health() -> HealthResponse:
         db_path=str(s.duckdb_path),
         own_channel_id=s.own_channel_id,
     )
+
+
+@app.get("/api/channels", response_model=list[Channel])
+def list_channels() -> list[Channel]:
+    with _read_db() as con:
+        rows = con.execute(
+            "SELECT id, title, handle, subs FROM channels ORDER BY subs DESC NULLS LAST",
+        ).fetchall()
+    return [
+        Channel(id=r[0], title=r[1], handle=r[2], subs=int(r[3]) if r[3] else None)
+        for r in rows
+    ]
 
 
 @app.get("/api/outliers", response_model=list[OutlierVideo])
@@ -450,3 +470,159 @@ def suggest(req: SuggestRequest) -> SuggestResponse:
 
 def _data_dir() -> Path:
     return get_settings().data_dir
+
+
+# --- thumbs --------------------------------------------------------------
+
+
+class ThemeOption(BaseModel):
+    id: int
+    label: str
+    n_outliers: int
+
+
+class ThumbFrame(BaseModel):
+    filename: str
+    score: float
+    face_score: float | None = None
+    outlier_similarity: float | None = None
+
+
+class ThumbOverlay(BaseModel):
+    text_present: bool
+    text_position: str
+    text_color: str
+    max_words: int
+    examples: list[str]
+
+
+class ThumbSuggestion(BaseModel):
+    job_id: str
+    frames: list[ThumbFrame]
+    overlay: ThumbOverlay
+    palette: list[str]
+
+
+@app.get("/api/themes", response_model=list[ThemeOption])
+def list_themes() -> list[ThemeOption]:
+    """Subgêneros (BERTopic Camada A) com pelo menos 3 outliers — usados pra
+    filtro de tema na sugestão de thumb."""
+    with _read_db() as con:
+        rows = con.execute(
+            """
+            SELECT f.theme_id, f.theme_label, COUNT(*) AS n
+            FROM video_features f
+            JOIN videos v ON v.id = f.video_id
+            JOIN outliers o ON o.video_id = v.id
+            WHERE v.is_short = false AND o.percentile_in_channel >= 90
+              AND f.theme_id IS NOT NULL AND f.theme_id >= 0
+            GROUP BY 1, 2
+            HAVING COUNT(*) >= 3
+            ORDER BY n DESC
+            """,
+        ).fetchall()
+    return [
+        ThemeOption(
+            id=int(r[0]),
+            label=humanize_topic_label(r[1]) or str(r[1]),
+            n_outliers=int(r[2]),
+        )
+        for r in rows
+    ]
+
+
+@app.post("/api/thumbs/suggest", response_model=ThumbSuggestion)
+async def thumbs_suggest(
+    video: UploadFile = File(...),  # noqa: B008
+    theme_id: int | None = Form(None),  # noqa: B008
+    top_k: int = Form(3),  # noqa: B008
+) -> ThumbSuggestion:
+    """Recebe vídeo upload, extrai frames, scoreia, retorna top K + paleta +
+    overlay declarativo."""
+    import shutil
+    import uuid
+
+    from jason.thumbs.colors import dominant_colors_from_paths, hex_from_rgb
+    from jason.thumbs.frame_extractor import extract_candidate_frames
+    from jason.thumbs.frame_scorer import score_frames
+    from jason.thumbs.text_overlay_advisor import suggest_overlay
+
+    job_id = uuid.uuid4().hex[:12]
+    out_dir = get_settings().data_dir / "thumb_suggestions" / job_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    suffix = Path(video.filename or "video.mp4").suffix or ".mp4"
+    video_path = out_dir / f"video{suffix}"
+    with video_path.open("wb") as f:
+        shutil.copyfileobj(video.file, f)
+
+    try:
+        candidates = extract_candidate_frames(video_path, output_dir=out_dir)
+        kept_paths = [c["path"] for c in candidates if c.get("kept")]
+        if not kept_paths:
+            raise HTTPException(
+                status_code=422,
+                detail="Nenhum frame passou nos filtros de luminância/blur.",
+            )
+        scored_all = score_frames(kept_paths, theme_id=theme_id)
+        scored = scored_all[:top_k]
+        overlay = suggest_overlay(theme_id=theme_id)
+
+        # Paleta dominante: top outlier thumbs locais do tema (se existirem)
+        palette: list[str] = []
+        thumb_dir = get_settings().data_dir / "thumbnails"
+        if theme_id is not None:
+            with _read_db() as con:
+                rows = con.execute(
+                    """
+                    SELECT v.id FROM videos v
+                    JOIN video_features f ON f.video_id = v.id
+                    JOIN outliers o ON o.video_id = v.id
+                    WHERE f.theme_id = ? AND o.percentile_in_channel >= 90
+                    ORDER BY o.multiplier DESC LIMIT 20
+                    """,
+                    [theme_id],
+                ).fetchall()
+            paths = [thumb_dir / f"{r[0]}.jpg" for r in rows]
+            paths = [p for p in paths if p.exists()]
+            if len(paths) >= 3:
+                colors = dominant_colors_from_paths(paths, k=4)
+                palette = [hex_from_rgb(c) for c in colors]
+
+        frames = [
+            ThumbFrame(
+                filename=Path(s["path"]).name,
+                score=float(s["score"]),
+                face_score=float(s.get("face_score") or 0),
+                outlier_similarity=float(s.get("outlier_similarity") or 0),
+            )
+            for s in scored
+        ]
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Falha no pipeline: {exc}") from exc
+
+    return ThumbSuggestion(
+        job_id=job_id,
+        frames=frames,
+        overlay=ThumbOverlay(
+            text_present=overlay.get("text_present", True),
+            text_position=overlay.get("text_position", "top_left"),
+            text_color=overlay.get("text_color", "yellow"),
+            max_words=int(overlay.get("max_words", 3)),
+            examples=list(overlay.get("examples", [])),
+        ),
+        palette=palette,
+    )
+
+
+@app.get("/api/thumbs/frame/{job_id}/{filename}")
+def thumb_frame(job_id: str, filename: str) -> FileResponse:
+    """Serve um frame extraído. Validação contra path traversal."""
+    if "/" in job_id or "\\" in job_id or ".." in job_id:
+        raise HTTPException(status_code=400, detail="bad job_id")
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="bad filename")
+    p = get_settings().data_dir / "thumb_suggestions" / job_id / filename
+    if not p.exists() or not p.is_file():
+        raise HTTPException(status_code=404, detail="not found")
+    return FileResponse(p)

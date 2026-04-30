@@ -17,6 +17,13 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 // --- response types (mirror src/jason/api/main.py) ----------------------
 
+export type Channel = {
+  id: string;
+  title: string;
+  handle: string | null;
+  subs: number | null;
+};
+
 export type OutlierVideo = {
   id: string;
   title: string;
@@ -84,4 +91,32 @@ export type SuggestResponse = {
   candidates: SuggestCandidate[];
   rag_outlier_count: number;
   model_trained: boolean;
+};
+
+export type ThemeOption = {
+  id: number;
+  label: string;
+  n_outliers: number;
+};
+
+export type ThumbFrame = {
+  filename: string;
+  score: number;
+  face_score: number | null;
+  outlier_similarity: number | null;
+};
+
+export type ThumbOverlay = {
+  text_present: boolean;
+  text_position: string;
+  text_color: string;
+  max_words: number;
+  examples: string[];
+};
+
+export type ThumbSuggestion = {
+  job_id: string;
+  frames: ThumbFrame[];
+  overlay: ThumbOverlay;
+  palette: string[];
 };
