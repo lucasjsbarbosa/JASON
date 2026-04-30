@@ -388,6 +388,36 @@ def features_title(
     )
 
 
+@features_app.command("topics")
+def features_topics(
+    themes: bool = typer.Option(False, "--themes", help="Fit BERTopic on masked titles."),
+    franchises: bool = typer.Option(False, "--franchises", help="Fit BERTopic on raw titles."),
+) -> None:
+    """Fit two-layer BERTopic (themes with name-masking + franchises raw).
+
+    Long-form videos only (Shorts excluded). Requires `uv sync --group ml`.
+    """
+    if not (themes or franchises):
+        typer.echo("Pick --themes, --franchises, or both.", err=True)
+        raise typer.Exit(1)
+
+    if themes:
+        from jason.features.topics import fit_themes
+        r = fit_themes()
+        typer.secho(
+            f"themes: {r['fit']} videos → {r['topics']} non-noise topics",
+            fg=typer.colors.GREEN,
+        )
+
+    if franchises:
+        from jason.features.topics import fit_franchises
+        r = fit_franchises()
+        typer.secho(
+            f"franchises: {r['fit']} videos → {r['topics']} non-noise topics",
+            fg=typer.colors.GREEN,
+        )
+
+
 @features_app.command("embeddings")
 def features_embeddings(
     titles: bool = typer.Option(False, "--titles", help="Encode title embeddings."),
