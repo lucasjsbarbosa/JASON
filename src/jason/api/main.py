@@ -118,6 +118,7 @@ class ScoreContribution(BaseModel):
     direction: str
     verb: str
     color: str
+    context: str = ""
 
 
 class ScoreResponse(BaseModel):
@@ -281,6 +282,8 @@ def score(req: ScoreRequest) -> ScoreResponse:
             detail=f"Modelo não treinado ainda: {exc}",
         ) from exc
 
+    from jason.dashboard.feature_context import context_for
+
     contributions = []
     for c in r["contributions"]:
         h = humanize_contribution(c)
@@ -292,6 +295,7 @@ def score(req: ScoreRequest) -> ScoreResponse:
             direction=c["direction"],
             verb=h["verb"],
             color=h["color"],
+            context=context_for(c["feature"], c["value"]),
         ))
     return ScoreResponse(
         multiplier=float(r["multiplier"]),
@@ -438,6 +442,8 @@ def suggest(req: SuggestRequest) -> SuggestResponse:
             candidates.append(SuggestCandidate(title=t))
             continue
 
+        from jason.dashboard.feature_context import context_for as _ctx
+
         mult = float(s["multiplier"])
         contribs: list[ScoreContribution] = []
         for c in s["contributions"]:
@@ -450,6 +456,7 @@ def suggest(req: SuggestRequest) -> SuggestResponse:
                 direction=c["direction"],
                 verb=h["verb"],
                 color=h["color"],
+                context=_ctx(c["feature"], c["value"]),
             ))
         candidates.append(SuggestCandidate(
             title=t,

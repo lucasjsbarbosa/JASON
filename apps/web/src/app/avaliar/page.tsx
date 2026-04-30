@@ -172,6 +172,11 @@ export default function AvaliarPage() {
                     <div className="text-xs text-[var(--muted)] font-mono">
                       {c.value} · {c.verb}
                     </div>
+                    {c.context && (
+                      <div className="text-xs mt-1" style={{ color: "#A8A39A" }}>
+                        {c.context}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}

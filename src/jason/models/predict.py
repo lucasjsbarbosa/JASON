@@ -166,6 +166,31 @@ def score_title_with_explanation(
     boosters = artifacts["boosters"]
     meta = artifacts["meta"]
 
+    # Compute title_embedding on-the-fly when caller didn't pass one.
+    # Without this, title_cluster falls back to an arbitrary default and the
+    # SHAP contribution for that feature is meaningless noise.
+    if title_embedding is None and artifacts.get("title_kmeans") is not None:
+        try:
+            from jason.features.embeddings import _default_title_encoder  # noqa: PLC0415
+            title_embedding = _default_title_encoder()([title])[0]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("could not compute title_embedding on-the-fly: %s", exc)
+
+    # Hide features whose values are fake fallbacks (caller didn't provide
+    # the input, so the SHAP contribution is meaningless noise):
+    #   - thumb_cluster: depends on thumb_embedding upload (not in /avaliar)
+    #   - title_cluster: depends on title_embedding (now computed above; only
+    #     suppress if that failed)
+    #   - theme_id / franchise_id: would need BERTopic.transform on the
+    #     candidate. Default is sentinel -1 (BERTopic noise cluster), which
+    #     trains as a real category but doesn't reflect "we detected this
+    #     subgenre" — it reflects "we didn't run topic detection".
+    suppress_features: set[str] = {"theme_id", "franchise_id"}
+    if thumb_embedding is None:
+        suppress_features.add("thumb_cluster")
+    if title_embedding is None:
+        suppress_features.add("title_cluster")
+
     pub = published_at or datetime.now(UTC).replace(microsecond=0)
     row = assemble_score_row(
         title=title,
@@ -189,7 +214,10 @@ def score_title_with_explanation(
         [b.predict(X, pred_contrib=True)[0] for b in boosters], axis=0,
     )
     feature_names = meta["feature_columns"]
-    feat_contrib = list(zip(feature_names, contribs[:-1], strict=True))
+    feat_contrib = [
+        (name, c) for name, c in zip(feature_names, contribs[:-1], strict=True)
+        if name not in suppress_features
+    ]
     feat_contrib.sort(key=lambda x: abs(x[1]), reverse=True)
 
     explanation = []

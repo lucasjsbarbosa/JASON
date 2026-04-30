@@ -185,24 +185,31 @@ export default function SugerirPage() {
                     </div>
                   </div>
                   {open && c.contributions.length > 0 && (
-                    <div className="mt-3 ml-12 space-y-1 border-l border-[var(--border)] pl-4">
+                    <div className="mt-3 ml-12 space-y-2 border-l border-[var(--border)] pl-4">
                       {c.contributions.map((cc, j) => (
-                        <div
-                          key={j}
-                          className="flex items-center gap-3 text-sm py-0.5"
-                        >
+                        <div key={j} className="flex items-start gap-3 text-sm">
                           <span
                             style={{ color: cc.color, width: "1rem" }}
-                            className="text-center"
+                            className="text-center mt-0.5"
                           >
                             {cc.direction === "up" ? "▲" : "▼"}
                           </span>
-                          <span className="flex-1">
-                            {cc.label}{" "}
-                            <span className="text-[var(--muted)] text-xs">
-                              ({cc.value} · {cc.verb})
-                            </span>
-                          </span>
+                          <div className="flex-1">
+                            <div>
+                              {cc.label}{" "}
+                              <span className="text-[var(--muted)] text-xs">
+                                ({cc.value} · {cc.verb})
+                              </span>
+                            </div>
+                            {cc.context && (
+                              <div
+                                className="text-xs mt-0.5"
+                                style={{ color: "#A8A39A" }}
+                              >
+                                {cc.context}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>

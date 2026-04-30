@@ -54,6 +54,7 @@ export type ScoreContribution = {
   direction: "up" | "down";
   verb: string;
   color: string;
+  context: string;
 };
 
 export type ScoreResponse = {
