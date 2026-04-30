@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -8,7 +9,7 @@ export const metadata: Metadata = {
 
 const NAV = [
   { href: "/", label: "Início" },
-  { href: "/outliers", label: "Outliers" },
+  { href: "/outliers", label: "Outliers do nicho" },
   { href: "/avaliar", label: "Avaliar título" },
   { href: "/sugerir", label: "Sugerir" },
   { href: "/thumbs", label: "Thumb" },
@@ -21,11 +22,30 @@ export default function RootLayout({
     <html lang="pt-BR">
       <body className="min-h-screen flex flex-col">
         <header className="mast">
-          <div className="mast-name">J A S O N</div>
-          <div className="mast-sub">youtube outlier intelligence · @babygiulybaby</div>
-          <nav className="mt-4 flex gap-6 text-sm">
+          <div className="flex items-center gap-4">
+            <Image
+              src="/jason-logo.png"
+              alt="JASON"
+              width={220}
+              height={88}
+              priority
+              className="h-16 w-auto"
+            />
+            <div>
+              <div className="mast-sub">youtube outlier intelligence</div>
+              <div className="mast-sub" style={{ fontSize: "0.7rem" }}>
+                @babygiulybaby
+              </div>
+            </div>
+          </div>
+          <nav className="mt-5 flex gap-6 text-sm">
             {NAV.map((n) => (
-              <a key={n.href} href={n.href} className="text-[var(--muted)] hover:text-[var(--text)] uppercase tracking-wider">
+              <a
+                key={n.href}
+                href={n.href}
+                className="text-[var(--muted)] hover:text-[var(--text)] uppercase tracking-wider"
+                style={{ fontFamily: "var(--font-display)" }}
+              >
                 {n.label}
               </a>
             ))}
