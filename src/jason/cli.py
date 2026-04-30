@@ -347,12 +347,44 @@ def snapshot_run(
 # --- features (Phase 2) ------------------------------------------------------
 
 
-@features_app.command("compute")
-def features_compute(
-    all_features: bool = typer.Option(False, "--all", help="Compute every feature."),
+@features_app.command("title")
+def features_title(
+    channel: str | None = typer.Option(
+        None, "--channel", "-c",
+        help="Limit to one channel (UC...). Default: all videos.",
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Recompute even videos that already have features.",
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Count what would be computed."),
 ) -> None:
-    """Compute multipliers, title features, embeddings, topics."""
-    raise typer.Exit(_not_yet("features compute", "Phase 2"))
+    """Compute title-level features (length, caps, niche keywords, etc.)."""
+    import duckdb
+
+    settings = get_settings()
+
+    if dry_run:
+        with duckdb.connect(str(settings.duckdb_path)) as con:
+            sql = "SELECT COUNT(*) FROM videos v"
+            params: list = []
+            if not force:
+                sql += " LEFT JOIN video_features f ON f.video_id = v.id WHERE f.video_id IS NULL"
+            else:
+                sql += " WHERE 1=1"
+            if channel:
+                sql += " AND v.channel_id = ?"
+                params.append(channel)
+            count = con.execute(sql, params).fetchone()[0]
+        typer.echo(f"[dry-run] would compute features for {count} video(s)")
+        raise typer.Exit(0)
+
+    from jason.features.title_features import compute_title_features
+
+    result = compute_title_features(channel_id=channel, force=force)
+    typer.secho(
+        f"title features: {result['computed']} computed (of {result['requested']} pending)",
+        fg=typer.colors.GREEN,
+    )
 
 
 # --- model (Phase 3) ---------------------------------------------------------
