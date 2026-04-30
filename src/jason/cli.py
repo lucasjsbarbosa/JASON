@@ -271,11 +271,12 @@ def ingest_resolve_handles(
     """Resolve @handles to UC... channel IDs (cached in handle_cache)."""
     from jason.ingestion.handle_resolver import resolve_handles
 
-    handles = [
-        line.strip()
-        for line in file.read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.strip().startswith("#")
-    ]
+    handles = []
+    for raw in file.read_text(encoding="utf-8").splitlines():
+        # Strip inline comments first (e.g. "@foo  # description"), then trim.
+        stripped = raw.split("#", 1)[0].strip()
+        if stripped:
+            handles.append(stripped)
     if not handles:
         typer.echo(f"no handles found in {file}", err=True)
         raise typer.Exit(1)
@@ -385,6 +386,42 @@ def features_title(
         f"title features: {result['computed']} computed (of {result['requested']} pending)",
         fg=typer.colors.GREEN,
     )
+
+
+@features_app.command("outliers")
+def features_outliers(
+    channel: str | None = typer.Option(
+        None, "--channel", "-c",
+        help="Compute for one channel (UC...). Default: all channels.",
+    ),
+    target_days: int = typer.Option(28, "--target-days", help="Age (days) for views_at_age."),
+    window_days: int = typer.Option(90, "--window-days", help="Window for intra-channel percentile."),
+    skip_percentile: bool = typer.Option(False, "--skip-percentile", help="Only compute multipliers."),
+) -> None:
+    """Compute outlier multipliers + intra-channel percentiles per video."""
+    import duckdb
+
+    from jason.features.outliers import compute_multiplier, compute_percentile
+
+    settings = get_settings()
+    if channel:
+        targets = [channel]
+    else:
+        with duckdb.connect(str(settings.duckdb_path)) as con:
+            targets = [r[0] for r in con.execute("SELECT id FROM channels").fetchall()]
+
+    for cid in targets:
+        m = compute_multiplier(cid, target_days=target_days)
+        msg = (
+            f"  {cid}: total={m['total_videos']} eligible={m['eligible']} "
+            f"computed={m['computed']} skipped(baseline)={m['skipped_no_baseline']} "
+            f"skipped(age_data)={m['skipped_no_age_data']}"
+        )
+        typer.secho(msg, fg=typer.colors.GREEN if m["computed"] else typer.colors.YELLOW)
+
+        if not skip_percentile and m["computed"] > 0:
+            p = compute_percentile(cid, window_days=window_days)
+            typer.echo(f"     percentiles updated for {p['computed']} video(s)")
 
 
 # --- model (Phase 3) ---------------------------------------------------------

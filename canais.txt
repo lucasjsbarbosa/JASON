@@ -2,29 +2,46 @@
 # Formato: um @handle por linha. Comentários e linhas em branco são ignorados.
 # Resolver com: `jason ingest resolve-handles -f canais.txt -o canais_ids.txt`
 # Auditar freshness com: `uv run python scripts/audit_channels.py`
+# Última revisão: 2026-04-30
 
-# === ATIVOS (auditados em 2026-04-30, postaram nos últimos 6 meses) ==========
-@IconografiaDaHistoria       # análises profundas, 1.89M, 1807 vídeos
-@JuMCassini                  # bizarro/terror/crimes, 3.29M, 2463 vídeos
-@RefugioCult                 # cinema sombrio e bizarro, 1.44M, 1937 vídeos
-@CineAntiqua                 # cinema antigo / horror clássico, 153K, 255 vídeos (mais alinhado com @babygiulybaby)
+# === CANAL PRÓPRIO ==========================================================
+@babygiulybaby               # alvo do sistema — UC ID: UCjLen2Tbkj91nLnlD6nmnZQ
 
-# === A REVISAR (a namorada precisa indicar handles corretos / substitutos) ===
-# Os handles abaixo deram problema na auditoria de 2026-04-30; deixados aqui
-# como TODO até ela passar versão revisada. Não descomentar sem checar.
-#
-# @HoradoTerror               # MORTO há 4 anos 249d (2021)
-# @CapraPeckinpah             # MORTO há 8 anos 201d (2017)
-# @ClassicosdoTerror          # MORTO há 1 ano 164d
-# @BabyMonster                # NICHO ERRADO — é o grupo de K-pop BABYMONSTER, não horror
-# @BKOff                      # VAZIO (handle resolveu mas canal sem vídeos — handle errado?)
-# @JaquelineGuerreiro         # VAZIO (363 subs, 0 vídeos — handle errado?)
-# @Carbosa                    # NÃO RESOLVE (typo? canal renomeado?)
-# @EddyKaos                   # NÃO RESOLVE
-# @LeratéAmanhecer            # NÃO RESOLVE (acentos?)
-# @MarcosCamposOficial        # NÃO RESOLVE
+# === COMPARÁVEIS AO ALVO (faixa pequena/média, foco horror/crítica) ========
+@Cinestera                   # ~105k — análise + final explicado, próximo do alvo
+@canalvideoterapia           # ~63.7k — cinema comentado, leitura de obra
+@CanalInfluencine            # ~18.1k — entenda o filme, packaging forte
+@caiodaquino                 # ~69.7k — Sessão Comentada, crítica + listas
+@CinemaFerox                 # ~18.1k — fantástico/horror/cult
+@showdecinema                # ~18.3k — review + análise com spoilers
+@PlanetaTerror               # ~46.9k — lançamentos, trailers, hype
+@canalterrorifico            # ~7.4k — listas/curiosidades, escala próxima do alvo
+@canaldoinferno              # ~7.34k — Boca do Inferno, horror BR tradicional
+@Ocaradacultura              # ~1.27k — micro, terror recente, linguagem crítica
+@temcoragemnao               # ~2.03k — listas clicáveis, packaging vencedor
+@QuartaParedeTV              # ~16k — franquia + curiosidade + caso real
+@oswaldomarchi               # ~13.3k — horror/trash, voz autoral
+@ahoradopesadelopodcast      # ~2.7k — análise/lives/horror news
+@terrorsemmedo13             # ~434 — abaixo da faixa, mas muito ativo
 
-# === META: alvo é 15-25 canais ativos do nicho ==============================
-# Per CLAUDE.md, prioridade pra faixa MÉDIA (1k-200k subs) — só CineAntiqua
-# está nessa faixa hoje. Os outros 3 são >1M (referência de packaging, não
-# baseline de comparação justa).
+# === ATIVOS DA RODADA ANTERIOR (mantidos) ===================================
+@IconografiaDaHistoria       # 1.89M — análises profundas
+@JuMCassini                  # 3.29M — bizarro/terror/crimes
+@RefugioCult                 # 1.44M — cinema sombrio e bizarro
+@CineAntiqua                 # 153K — cinema antigo / horror clássico
+
+# === REFERÊNCIAS GRANDES (packaging, não baseline direto) ===================
+@TrasheiraViolenta           # ~119k — horror/trash BR, voz e comunidade
+@getrocombr                  # ~503k — perturbadores/bizarros, cult
+@ArthurViana                 # ~684k — cinema amplo com forte recurso a horror
+@BetoRibeiroCrime            # ~2.27M — true crime + filmes (overlap)
+@NaCenaDoCrime_              # ~436k — true crime, packaging em title/thumb
+
+# === DESCARTADOS NA AUDITORIA DE 2026-04-30 (motivo no comentário) ===========
+# @HoradoTerror               # MORTO há 4 anos
+# @CapraPeckinpah             # MORTO há 8 anos
+# @ClassicosdoTerror          # MORTO há 1.5 anos
+# @BabyMonster                # nicho errado (K-pop)
+# @BKOff                      # canal vazio
+# @JaquelineGuerreiro         # canal vazio
+# @Carbosa, @EddyKaos, @LeratéAmanhecer, @MarcosCamposOficial — não resolvem

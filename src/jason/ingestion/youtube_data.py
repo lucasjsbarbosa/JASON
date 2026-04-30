@@ -34,6 +34,13 @@ YT_VIDEOS_URL = f"{YT_API_BASE}/videos"
 
 VIDEOS_BATCH_SIZE = 50  # max permitted by videos.list
 
+# YouTube raised the Shorts duration cap from 60s to 180s in 2024. Channels
+# that publish vertical content rarely add `#shorts` to title/description, so
+# duration is the only reliable post-hoc signal. False positives (e.g. a 90s
+# trailer that's actually long-form) are rare and downstream models filter
+# Shorts out anyway — better to over-flag than miss the bulk of vertical content.
+SHORTS_DURATION_CAP_S = 180
+
 _ISO_DURATION_RE = re.compile(
     r"^P(?:(?P<days>\d+)D)?T?(?:(?P<hours>\d+)H)?(?:(?P<minutes>\d+)M)?(?:(?P<seconds>\d+)S)?$"
 )
@@ -58,8 +65,8 @@ def parse_iso_duration(iso: str) -> int:
 
 
 def is_short_video(duration_s: int, title: str, description: str) -> bool:
-    """Detect Shorts: <=60s duration OR #shorts tag in title/description."""
-    if duration_s and duration_s <= 60:
+    """Detect Shorts: <=SHORTS_DURATION_CAP_S OR #shorts tag in title/description."""
+    if duration_s and duration_s <= SHORTS_DURATION_CAP_S:
         return True
     return bool(_SHORTS_TAG_RE.search(title or "") or _SHORTS_TAG_RE.search(description or ""))
 

@@ -48,12 +48,14 @@ def test_parse_iso_duration(iso: str, expected: int) -> None:
 @pytest.mark.parametrize(
     "duration_s, title, description, expected",
     [
-        (45, "normal title", "", True),  # short by duration
-        (60, "edge case", "", True),  # boundary
-        (61, "long form", "", False),
-        (300, "Trailer #Shorts", "", True),  # tag in title
+        (45, "normal title", "", True),       # well below cap
+        (60, "edge case", "", True),          # legacy 60s threshold (still a Short)
+        (180, "boundary", "", True),           # current 180s cap
+        (181, "just past the cap", "", False), # crosses into long-form
+        (300, "Trailer #Shorts", "", True),   # tag in title overrides duration
         (300, "Trailer", "Veja em #shorts!", True),  # tag in description
         (300, "Long shortcut", "no tag here", False),  # 'short' substring without #
+        (3600, "Full review", "", False),     # full-length video
     ],
 )
 def test_is_short_video(duration_s: int, title: str, description: str, expected: bool) -> None:
