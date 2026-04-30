@@ -539,9 +539,67 @@ def model_score(
 @app.command("suggest")
 def suggest(
     transcript: Path = typer.Option(..., "--transcript", help="Path to transcript text/JSON."),
+    channel: str = typer.Option(
+        "UCjLen2Tbkj91nLnlD6nmnZQ", "--channel",
+        help="Target channel UC... (default: @babygiulybaby).",
+    ),
+    theme: str | None = typer.Option(None, "--theme", help="Optional theme/franchise hint."),
+    num_candidates: int = typer.Option(10, "--num", help="How many candidates to generate."),
+    top_k: int = typer.Option(3, "--top-k", help="How many top-ranked candidates to print."),
+    duration_s: int = typer.Option(600, "--duration", help="Hypothetical duration for scoring."),
+    skip_score: bool = typer.Option(
+        False, "--skip-score",
+        help="Don't rank with the regressor (use when no model artifact yet).",
+    ),
 ) -> None:
-    """Generate 10 candidate titles, return top 3 ranked by the model."""
-    raise typer.Exit(_not_yet("suggest", "Phase 4"))
+    """Generate N candidate titles via Claude, rank with the regressor, return top-K."""
+    if not transcript.exists():
+        typer.echo(f"transcript not found: {transcript}", err=True)
+        raise typer.Exit(1)
+
+    text = transcript.read_text(encoding="utf-8")
+    if transcript.suffix == ".json":
+        import json
+        try:
+            data = json.loads(text)
+            text = data.get("text", text)
+        except json.JSONDecodeError:
+            pass
+
+    from jason.generation.titles import generate_titles, persist_suggestions
+
+    typer.echo(f"generating {num_candidates} candidates via Claude...")
+    result = generate_titles(
+        text, channel_id=channel, theme=theme, num_candidates=num_candidates,
+    )
+    candidates: list[tuple[str, float | None]] = []
+
+    if skip_score:
+        candidates = [(t, None) for t in result["titles"]]
+    else:
+        try:
+            from jason.models.predict import score_title
+            scored = []
+            for t in result["titles"]:
+                s = score_title(t, channel, duration_s=duration_s)
+                scored.append((t, s["multiplier"]))
+            scored.sort(key=lambda x: (x[1] or 0.0), reverse=True)
+            candidates = scored
+        except FileNotFoundError as exc:
+            typer.secho(f"warning: {exc} — skipping ranking", fg=typer.colors.YELLOW, err=True)
+            candidates = [(t, None) for t in result["titles"]]
+
+    persist_suggestions(
+        channel_id=channel,
+        candidates=candidates,
+        transcript_hash=result["transcript_hash"],
+        outlier_ids=result["outlier_ids"],
+    )
+
+    typer.secho(f"\ntop {min(top_k, len(candidates))} candidates:", fg=typer.colors.GREEN)
+    for i, (title, mult) in enumerate(candidates[:top_k], start=1):
+        score = f"{mult:.2f}x" if mult is not None else "n/a"
+        typer.echo(f"  {i}. [{score}] {title}")
 
 
 # --- helpers -----------------------------------------------------------------
