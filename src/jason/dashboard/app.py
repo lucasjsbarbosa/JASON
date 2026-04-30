@@ -138,12 +138,17 @@ def _tab_title_scorer() -> None:
     settings = get_settings()
     title = st.text_input("Título candidato", "FINAL EXPLICADO de Hereditário (2018)")
     channel = st.text_input("Channel ID (UC...)", settings.own_channel_id)
-    duration = st.number_input("Duração estimada (s)", min_value=60, value=600)
+    duration_min = st.number_input(
+        "Duração estimada (minutos)", min_value=1.0, max_value=180.0, value=40.0, step=1.0,
+        help="O canal foca em análises longas (~30–50 min). Convertido pra segundos antes do score.",
+    )
+    duration_s = int(duration_min * 60)
+    st.caption(f"= {duration_s}s")
 
     if st.button("Score"):
         try:
             from jason.models.predict import score_title
-            r = score_title(title, channel, duration_s=duration)
+            r = score_title(title, channel, duration_s=duration_s)
             st.metric("Multiplier predito", f"{r['multiplier']:.2f}×")
             st.caption(f"log_multiplier = {r['log_multiplier']:.4f}")
         except FileNotFoundError as exc:
@@ -163,12 +168,14 @@ def _tab_suggest_title() -> None:
     channel = st.text_input("Channel ID", settings.own_channel_id, key="suggest_channel")
     theme = st.text_input("Tema/franquia (opcional)", "")
     num = st.slider("Quantos candidatos gerar", 3, 15, 10)
-    duration = st.number_input(
-        "Duração estimada do vídeo (s)", min_value=60, value=600,
-        help="Duração tem peso alto no modelo (#2 feature). Use o tempo real "
-             "estimado do vídeo pra o ranqueamento bater com a aba Score.",
-        key="suggest_duration",
+    duration_min = st.number_input(
+        "Duração estimada (minutos)", min_value=1.0, max_value=180.0, value=40.0, step=1.0,
+        help="Duração tem peso alto no modelo (#2 feature). O canal foca em "
+             "análises longas (~30–50 min). Convertido pra segundos antes do score.",
+        key="suggest_duration_min",
     )
+    duration = int(duration_min * 60)
+    st.caption(f"= {duration}s")
 
     if st.button("Gerar"):
         if not transcript.strip():
