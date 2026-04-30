@@ -1,0 +1,44 @@
+[project]
+name = "jason"
+version = "0.1.0"
+description = "YouTube growth engine for @babygiulybaby — outlier-driven title generation"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Lucas Barbosa", email = "lucasbarbosa_182@hotmail.com" },
+]
+dependencies = [
+    "typer>=0.12",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "duckdb>=1.0",
+    "structlog>=24.4",
+]
+
+[project.scripts]
+jason = "jason.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jason"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.6",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

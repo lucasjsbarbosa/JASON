@@ -1,0 +1,43 @@
+# --- Python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# --- Tooling caches ----------------------------------------------------------
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --- uv / venv ---------------------------------------------------------------
+.venv/
+# uv.lock IS committed — reproducibility
+
+# --- Secrets -----------------------------------------------------------------
+.env
+*.pat
+*.token
+**/credentials.json
+**/yt_token.json
+
+# --- JASON data --------------------------------------------------------------
+data/
+!data/.gitkeep
+
+# --- Models ------------------------------------------------------------------
+src/jason/models/artifacts/*.lgb
+src/jason/models/artifacts/bertopic_*
+
+# --- IDE / OS ----------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
