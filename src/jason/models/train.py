@@ -20,7 +20,7 @@ import logging
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from jason.config import get_settings
 from jason.models.features import (
@@ -55,12 +55,24 @@ def _stack_or_none(series: pd.Series, expected_dim: int) -> np.ndarray | None:
     """Stack a series of list[float] into an (n, dim) array. Returns None if
     fewer than half the rows have a vector — k-means won't help."""
     import numpy as np  # noqa: PLC0415
+    import pandas as pd  # noqa: PLC0415
 
-    valid = [v for v in series if v is not None]
-    if len(valid) < len(series) // 2:
+    # Pandas Series fed by DuckDB delivers pd.NA for nulls (not Python None),
+    # and FLOAT[N] arrays come through as tuples — so we normalize both.
+    def _is_missing(v: Any) -> bool:
+        try:
+            return bool(pd.isna(v))
+        except (TypeError, ValueError):
+            return False
+
+    valid_count = sum(1 for v in series if not _is_missing(v))
+    if valid_count < len(series) // 2:
         return None
-    arr = np.array([v if v is not None else [0.0] * expected_dim for v in series], dtype=np.float32)
-    return arr
+    rows = [
+        list(v) if not _is_missing(v) else [0.0] * expected_dim
+        for v in series
+    ]
+    return np.array(rows, dtype=np.float32)
 
 
 def _fit_kmeans(arr: np.ndarray, k: int) -> KMeans:
@@ -87,15 +99,23 @@ def _featurize(
     for c in CATEGORICAL_COLS:
         X[c] = df[c].astype("category")
 
+    def _missing(v: Any) -> bool:
+        try:
+            return bool(pd.isna(v))
+        except (TypeError, ValueError):
+            return False
+
     if title_kmeans is not None:
+        dim = title_kmeans.n_features_in_
         title_arr = np.array(
-            [v if v is not None else [0.0] * title_kmeans.n_features_in_ for v in df["title_embedding"]],
+            [list(v) if not _missing(v) else [0.0] * dim for v in df["title_embedding"]],
             dtype=np.float32,
         )
         X["title_cluster"] = pd.Categorical(title_kmeans.predict(title_arr))
     if thumb_kmeans is not None:
+        dim = thumb_kmeans.n_features_in_
         thumb_arr = np.array(
-            [v if v is not None else [0.0] * thumb_kmeans.n_features_in_ for v in df["thumb_embedding"]],
+            [list(v) if not _missing(v) else [0.0] * dim for v in df["thumb_embedding"]],
             dtype=np.float32,
         )
         X["thumb_cluster"] = pd.Categorical(thumb_kmeans.predict(thumb_arr))
