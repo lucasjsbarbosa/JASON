@@ -126,6 +126,7 @@ class ScoreResponse(BaseModel):
     log_multiplier: float
     multiplier_human: str
     contributions: list[ScoreContribution]
+    n_neutral_features: int = 0
 
 
 class SuggestRequest(BaseModel):
@@ -302,6 +303,7 @@ def score(req: ScoreRequest) -> ScoreResponse:
         log_multiplier=float(r["log_multiplier"]),
         multiplier_human=humanize_multiplier(float(r["multiplier"])),
         contributions=contributions,
+        n_neutral_features=int(r.get("n_neutral_features", 0)),
     )
 
 

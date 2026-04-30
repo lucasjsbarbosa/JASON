@@ -149,6 +149,7 @@ def score_title_with_explanation(
     artifact_dir: Path | None = None,
     db_path: Path | None = None,
     top_k: int = 5,
+    min_magnitude: float = 0.05,
 ) -> dict[str, Any]:
     """Score a title AND return per-feature contributions to the prediction.
 
@@ -214,11 +215,21 @@ def score_title_with_explanation(
         [b.predict(X, pred_contrib=True)[0] for b in boosters], axis=0,
     )
     feature_names = meta["feature_columns"]
-    feat_contrib = [
+    feat_contrib_all = [
         (name, c) for name, c in zip(feature_names, contribs[:-1], strict=True)
         if name not in suppress_features
     ]
-    feat_contrib.sort(key=lambda x: abs(x[1]), reverse=True)
+    feat_contrib_all.sort(key=lambda x: abs(x[1]), reverse=True)
+
+    # Filter out near-zero contributions — they're noise, not signal.
+    # The verb "ajudou/atrapalhou" is misleading when |c| ≈ 0.01-0.02 because
+    # the model is basically saying "this feature doesn't matter for this
+    # specific title". Reporting them as positive/negative gives them weight
+    # they don't have.
+    feat_contrib = [
+        (n, c) for n, c in feat_contrib_all if abs(c) >= min_magnitude
+    ]
+    n_neutral = len(feat_contrib_all) - len(feat_contrib)
 
     explanation = []
     for fname, c in feat_contrib[:top_k]:
@@ -244,4 +255,5 @@ def score_title_with_explanation(
         "multiplier": float(np.expm1(log_mult)),
         "contributions": explanation,
         "base_value": float(contribs[-1]),
+        "n_neutral_features": n_neutral,
     }

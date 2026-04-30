@@ -62,6 +62,7 @@ export type ScoreResponse = {
   log_multiplier: number;
   multiplier_human: string;
   contributions: ScoreContribution[];
+  n_neutral_features: number;
 };
 
 export type PackagingGapRow = {

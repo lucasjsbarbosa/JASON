@@ -154,23 +154,33 @@ export default function AvaliarPage() {
             <p className="text-xs text-[var(--muted)] mb-1">
               Duas referências independentes — leia separado:
             </p>
-            <ul className="text-xs text-[var(--muted)] mb-4 list-disc list-inside space-y-0.5">
+            <ul className="text-xs text-[var(--muted)] mb-3 list-disc list-inside space-y-0.5">
               <li>
                 <span style={{ color: "#5BC076" }}>▲ ajudou</span> /{" "}
                 <span style={{ color: "var(--accent)" }}>▼ atrapalhou</span> —
-                o modelo previu pro <strong>seu canal</strong> (3.5k subs,
-                padrões da @babygiulybaby)
+                modelo previu pro <strong>seu canal</strong> (3.5k subs)
               </li>
               <li>
                 <span className="font-mono">Nicho geral:</span> estatística
-                dos vídeos top-10% nos 25 canais ingeridos
+                dos top-10% nos 25 canais ingeridos
               </li>
             </ul>
-            <p className="text-xs mb-4" style={{ color: "#A8A39A" }}>
-              Quando os dois divergem (ex: modelo diz &quot;ajudou&quot; mas
-              nicho diz &quot;abaixo da faixa vencedora&quot;), é sinal real
-              de que seu canal performa diferente do nicho médio.
-            </p>
+            <div className="text-xs mb-3 p-2 border border-[var(--border)]" style={{ background: "var(--surface-2)", color: "#A8A39A" }}>
+              <strong style={{ color: "#D4AF37" }}>⚠ calibração:</strong>{" "}
+              modelo tá em modo bootstrap (multiplier sem cohort 28d ainda)
+              + tier_1 (sua faixa) tem só ~87 outliers de sample. Features
+              com contribuição menor que ±0.05 são filtradas — são ruído,
+              não signal. Vai ficar mais nítido conforme acumular snapshots.
+              {result.n_neutral_features > 0 && (
+                <>
+                  {" "}
+                  <span className="font-mono">
+                    ({result.n_neutral_features} features tiveram impacto desprezível
+                    e foram omitidas.)
+                  </span>
+                </>
+              )}
+            </div>
             <div className="space-y-2">
               {result.contributions.map((c, i) => (
                 <div
