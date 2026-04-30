@@ -163,6 +163,12 @@ def _tab_suggest_title() -> None:
     channel = st.text_input("Channel ID", settings.own_channel_id, key="suggest_channel")
     theme = st.text_input("Tema/franquia (opcional)", "")
     num = st.slider("Quantos candidatos gerar", 3, 15, 10)
+    duration = st.number_input(
+        "Duração estimada do vídeo (s)", min_value=60, value=600,
+        help="Duração tem peso alto no modelo (#2 feature). Use o tempo real "
+             "estimado do vídeo pra o ranqueamento bater com a aba Score.",
+        key="suggest_duration",
+    )
 
     if st.button("Gerar"):
         if not transcript.strip():
@@ -177,7 +183,10 @@ def _tab_suggest_title() -> None:
                 )
             try:
                 from jason.models.predict import score_title
-                scored = [(t, score_title(t, channel)["multiplier"]) for t in result["titles"]]
+                scored = [
+                    (t, score_title(t, channel, duration_s=int(duration))["multiplier"])
+                    for t in result["titles"]
+                ]
                 scored.sort(key=lambda x: x[1], reverse=True)
             except FileNotFoundError:
                 scored = [(t, None) for t in result["titles"]]
