@@ -10,6 +10,7 @@ import pytest
 
 from jason.config import get_settings
 from jason.features.outliers import (
+    _trimmed_median,
     compute_multiplier,
     compute_percentile,
     views_at_age,
@@ -275,3 +276,27 @@ def test_compute_percentile_basic(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert percentiles[-1] >= 90.0
     # bottom multiplier should land near the bottom
     assert percentiles[0] <= 10.0
+
+
+# ---------------------------------------------------------------------------
+# trimmed median (rolling-baseline robustness)
+# ---------------------------------------------------------------------------
+
+
+def test_trimmed_median_resists_isolated_viral() -> None:
+    """Single huge value far above the rest must not move the trimmed median."""
+    baseline = [100] * 29 + [1_000_000]
+    assert _trimmed_median(baseline, trim_frac=0.1) == 100
+
+
+def test_trimmed_median_matches_plain_median_for_small_n() -> None:
+    """With <10 values, k=int(n*0.1) collapses to 0 and trimmed == plain median."""
+    arr = [1, 2, 3, 4, 5]
+    assert _trimmed_median(arr, trim_frac=0.1) == 3
+
+
+def test_trimmed_median_handles_low_outliers_too() -> None:
+    """Bottom-tail outliers also dropped (a long-dead channel firing back up)."""
+    baseline = [10] + [1000] * 28 + [9999]
+    out = _trimmed_median(baseline, trim_frac=0.1)
+    assert 900 <= out <= 1100  # core mass survives, tails dropped

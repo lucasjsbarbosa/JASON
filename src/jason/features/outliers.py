@@ -28,6 +28,21 @@ from jason.config import get_settings
 logger = logging.getLogger(__name__)
 
 
+def _trimmed_median(values: list[int], *, trim_frac: float = 0.1) -> float:
+    """Median ignoring the top and bottom `trim_frac` of the sorted sequence.
+
+    Robust to a single viral hit poisoning the rolling baseline. With <10
+    values the trim degrades to plain median (k=int(n*0.1) is 0).
+    """
+    if not values:
+        raise statistics.StatisticsError("no data points")
+    n = len(values)
+    k = int(n * trim_frac)
+    sorted_vals = sorted(values)
+    middle = sorted_vals[k : n - k] if k > 0 else sorted_vals
+    return statistics.median(middle)
+
+
 def views_at_age(
     con: duckdb.DuckDBPyConnection,
     video_id: str,
@@ -159,6 +174,9 @@ def compute_multiplier_live(
         60) so the bias mostly stabilizes.
       * Comparing intra-channel against the immediately preceding 30 siblings
         — the bias is approximately constant within that local window.
+      * **Trimmed median** (drop top/bottom 10%) so a single viral hit in
+        the rolling baseline doesn't deflate every multiplier that follows
+        it (or inflate the hit itself vs unusually weak prior siblings).
 
     Useful as a bootstrap before `compute_multiplier`'s 28-day cohort signal
     becomes available; switch back to the cohort method once snapshot history
@@ -209,7 +227,7 @@ def compute_multiplier_live(
             if len(baseline) < min_baseline:
                 skipped_baseline += 1
                 continue
-            median = statistics.median(baseline)
+            median = _trimmed_median(baseline, trim_frac=0.1)
             if median <= 0:
                 continue
             mult = views / median
