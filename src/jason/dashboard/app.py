@@ -724,6 +724,41 @@ finalizada (escopo explode com qualidade inconsistente).
         """,
         [label],
     ).df()
+
+    # Try to compute dominant colors across local thumbnail files for this theme.
+    # Falls back silently if PIL/sklearn not installed or no local files yet.
+    settings = get_settings()
+    thumb_dir = settings.data_dir / "thumbnails"
+    local_paths = []
+    for _, r in samples.iterrows():
+        p = thumb_dir / f"{r['id']}.jpg"
+        if p.exists():
+            local_paths.append(p)
+    if len(local_paths) >= 3:
+        try:
+            from jason.thumbs.colors import dominant_colors_from_paths, hex_from_rgb
+            colors = dominant_colors_from_paths(local_paths, k=4)
+            if colors:
+                st.markdown("**Paleta dominante do tema**")
+                st.caption(
+                    "4 cores principais extraídas via k-means sobre os pixels "
+                    "das thumbs outliers desse tema. Use como referência quando "
+                    "editar tua thumb (mesmo background tone, accent, etc)."
+                )
+                swatches = "".join(
+                    f"<div style='display:inline-block;margin-right:0.4rem;text-align:center'>"
+                    f"<div style='width:80px;height:60px;background:{hex_from_rgb(c)};"
+                    f"border:1px solid #2A2A2A'></div>"
+                    f"<div style='font-family:JetBrains Mono;font-size:0.7rem;"
+                    f"color:#888880;margin-top:0.2rem'>{hex_from_rgb(c)}</div>"
+                    f"</div>"
+                    for c in colors
+                )
+                st.markdown(swatches, unsafe_allow_html=True)
+                st.markdown("<div style='height:0.8rem'></div>", unsafe_allow_html=True)
+        except (ImportError, ModuleNotFoundError):
+            pass  # ML group not installed — skip palette silently
+
     cols = st.columns(3)
     for i, (_, row) in enumerate(samples.iterrows()):
         with cols[i % 3]:
