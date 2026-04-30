@@ -27,6 +27,7 @@ snapshot_app = typer.Typer(help="Run periodic stats snapshots (Phase 1).", no_ar
 analytics_app = typer.Typer(help="OAuth-gated YouTube Analytics for the canal próprio.", no_args_is_help=True)
 features_app = typer.Typer(help="Compute outlier multipliers, embeddings, topics (Phase 2).", no_args_is_help=True)
 model_app = typer.Typer(help="Train and score the title-multiplier regressor (Phase 3).", no_args_is_help=True)
+thumbs_app = typer.Typer(help="Thumbnail frame extraction + scoring (Phase 4.5).", no_args_is_help=True)
 
 app.add_typer(db_app, name="db")
 app.add_typer(ingest_app, name="ingest")
@@ -34,6 +35,7 @@ app.add_typer(snapshot_app, name="snapshot")
 app.add_typer(analytics_app, name="analytics")
 app.add_typer(features_app, name="features")
 app.add_typer(model_app, name="model")
+app.add_typer(thumbs_app, name="thumbs")
 
 
 @app.command("version")
@@ -650,6 +652,56 @@ def _not_yet(cmd: str, phase: str) -> int:
         err=True,
     )
     return 1
+
+
+@thumbs_app.command("suggest")
+def thumbs_suggest(
+    video_path: Path = typer.Option(..., "--video-path", help="Path to local video file."),
+    theme_id: int | None = typer.Option(
+        None, "--theme-id",
+        help="Restrict outlier centroid to this theme_id. Default: all themes.",
+    ),
+    output_dir: Path | None = typer.Option(
+        None, "--output-dir",
+        help="Directory for extracted frames. Default: data/thumb_suggestions/<video>/",
+    ),
+    top_k: int = typer.Option(3, "--top-k"),
+) -> None:
+    """Extract frames + score vs niche outliers + print top-K + overlay suggestion."""
+    import json
+
+    from jason.thumbs.frame_extractor import extract_candidate_frames
+    from jason.thumbs.frame_scorer import score_frames
+    from jason.thumbs.text_overlay_advisor import suggest_overlay
+
+    settings = get_settings()
+    out = output_dir or (settings.data_dir / "thumb_suggestions" / video_path.stem)
+
+    typer.echo(f"extracting frames to {out}...")
+    frames = extract_candidate_frames(video_path, output_dir=out)
+    kept = [f["path"] for f in frames if f["kept"]]
+    typer.echo(f"  {len(kept)} of {len(frames)} frames passed quality filters")
+
+    if not kept:
+        typer.echo("no usable frames after filtering. Try different thresholds.", err=True)
+        raise typer.Exit(1)
+
+    typer.echo("scoring frames...")
+    scored = score_frames(kept, theme_id=theme_id)
+
+    typer.secho(f"\ntop {min(top_k, len(scored))} frames:", fg=typer.colors.GREEN)
+    for i, r in enumerate(scored[:top_k], start=1):
+        typer.echo(
+            f"  {i}. score={r['combined']:.3f}  "
+            f"face={r['face_score']:.2f}  outlier_sim={r['outlier_similarity']:.3f}  "
+            f"{r['path'].name}"
+        )
+
+    overlay = suggest_overlay(theme_id=theme_id)
+    overlay_path = out / "overlay_suggestion.json"
+    overlay_path.write_text(json.dumps(overlay, ensure_ascii=False, indent=2), encoding="utf-8")
+    typer.echo(f"\noverlay suggestion → {overlay_path}")
+    typer.echo(json.dumps(overlay, ensure_ascii=False, indent=2))
 
 
 @app.command("dashboard")

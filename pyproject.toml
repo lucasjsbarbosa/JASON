@@ -49,6 +49,7 @@ ml = [
     "lightgbm>=4.5",                # multiplier regressor (Fase 3)
     "scikit-learn>=1.5",            # k-means cluster of embeddings + Spearman / metrics
     "pandas>=2.2",                  # feature matrix assembly + temporal split
+    "opencv-python>=4.10",          # frame quality + face detection (Fase 4.5)
 ]
 
 [tool.ruff]
