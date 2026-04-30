@@ -162,7 +162,7 @@ Implementar **uma fase por vez**. Não pular pra próxima sem testes da anterior
   - `video_stats_snapshots` (video_id, captured_at, days_since_publish, views, likes, comments) — **chave (video_id, captured_at)**. Toda métrica histórica passa por aqui. Job da Fase 1 popula. Multiplier da Fase 2 usa `views_at_28d` (interpolado se não tiver snapshot exato).
   - `title_tests` (video_id, variant_id, title, thumbnail_path, watch_time_share, **result**, **confidence_pct**) — `result` enum: `winner`, `loser`, `inconclusive`. **Semântica**: pra teste concluído com significância, exatamente 1 linha tem `winner` e as outras N-1 têm `loser`. Pra teste sem significância (Test & Compare deu inconclusive), **todas** as N linhas têm `inconclusive`.
   - `outliers` (video_id, multiplier, percentile_in_channel, computed_at) — guardar tanto multiplier absoluto quanto percentil intra-canal.
-  - **`migrations/002_horror_releases.sql` vem na Fase 1**, não na Fase 0: tabela `horror_releases` (tmdb_id, title, release_date, release_type, country, ingested_at). Necessária pra `days_to_nearest_horror_release` da Fase 3, mas só é populada quando o ingest TMDb existir.
+  - **`migrations/003_horror_releases.sql` vem na Fase 1**, não na Fase 0: tabela `horror_releases` (tmdb_id, title, release_date, release_type, country, ingested_at). Necessária pra `days_to_nearest_horror_release` da Fase 3, mas só é populada quando o ingest TMDb existir.
 - [ ] `pytest` rodando vazio sem erro
 
 ### Fase 1 — Ingestão (2-3 sessões)
@@ -176,7 +176,7 @@ Implementar **uma fase por vez**. Não pular pra próxima sem testes da anterior
 - [ ] `thumbnails.py`: download da maxres thumbnail, salva em `data/thumbnails/{video_id}.jpg`. Skip se já existe.
 - [ ] `transcripts.py`: `faster-whisper` modelo `large-v3` em GPU se disponível, fallback `medium` em CPU. Só transcrever vídeos do canal próprio + top-50 outliers do nicho. Salvar em `data/transcripts/{video_id}.json`.
 - [ ] `youtube_analytics.py`: OAuth flow (interação manual primeira vez — documentar no README). Pull diário de CTR, AVD, retention curve do canal próprio.
-- [ ] **`migrations/002_horror_releases.sql` + ingest TMDb release calendar**: cria tabela `horror_releases` (tmdb_id, title, release_date, release_type, country, ingested_at). CLI `jason ingest tmdb-releases --window-past 365 --window-future 180` puxa releases de horror dos últimos 12 meses + próximos 6 meses (filtrado por `with_genres=27` Horror, `with_release_type=3,4` theatrical/digital). Pré-requisito da feature `days_to_nearest_horror_release` da Fase 3.
+- [ ] **`migrations/003_horror_releases.sql` + ingest TMDb release calendar**: cria tabela `horror_releases` (tmdb_id, title, release_date, release_type, country, ingested_at). CLI `jason ingest tmdb-releases --window-past 365 --window-future 180` puxa releases de horror dos últimos 12 meses + próximos 6 meses (filtrado por `with_genres=27` Horror, `with_release_type=3,4` theatrical/digital). Pré-requisito da feature `days_to_nearest_horror_release` da Fase 3.
 - [ ] **Teste de aceitação**: rodar para um canal vizinho conhecido e validar que o número de vídeos no banco bate com o YouTube. Rodar snapshot 2x em dias diferentes e validar que existem 2 linhas por vídeo em `video_stats_snapshots` com `views` crescentes.
 
 ### Fase 2 — Feature engineering (1-2 sessões)
@@ -343,4 +343,5 @@ Mudanças aplicadas após primeira revisão técnica (registrar aqui qualquer mu
 - **v1.2**: `subs_bucket` deixou de ser coluna armazenada em `channels` — agora computado on-the-fly via `bucket_of(subs)`. Razão: subs cresce (3.5k → 10k é mudança de tier) e bucket cristalizado fica stale, contaminando features futuras.
 - **v1.2**: clarificada semântica de `title_tests.result` — pra teste concluído: 1 linha winner + N-1 loser; pra teste inconclusive: TODAS as N linhas com `inconclusive`. Evita ambiguidade na ingestão dos resultados do Test & Compare.
 - **v1.2**: `compute_multiplier` agora tem fallback explícito — < 10 vídeos anteriores elegíveis → `multiplier = NULL` e vídeo não entra em `outliers`. Sem baseline confiável o sinal vira ruído (canal jovem, primeiros meses).
-- **v1.2**: chamada explícita de `migrations/002_horror_releases.sql` + ingest TMDb adicionada à Fase 1, e referenciada na Fase 0 como dependência futura. Antes ficava implícita só na descrição da Fase 3.
+- **v1.2**: chamada explícita de `migrations/003_horror_releases.sql` + ingest TMDb adicionada à Fase 1, e referenciada na Fase 0 como dependência futura. Antes ficava implícita só na descrição da Fase 3.
+- **v1.3**: `migrations/002_handle_cache.sql` ocupa o slot 002 (handle resolver é a primeira tarefa da Fase 1, então faz sentido cronológico). `horror_releases` renumerada de 002 → 003. `jason db init` foi refatorado pra aplicar todas as migrations em `migrations/` em ordem de nome (ainda aceita `--migration X.sql` pra single file).

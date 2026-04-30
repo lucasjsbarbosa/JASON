@@ -43,30 +43,45 @@ def version() -> None:
 
 @db_app.command("init")
 def db_init(
-    migration: Path = typer.Option(
-        Path("migrations/001_init.sql"),
+    migration: Path | None = typer.Option(
+        None,
         "--migration",
         "-m",
-        help="Path to the SQL migration file.",
+        help="Apply a single migration file. Default: apply all .sql in migrations/ in name order.",
     ),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print SQL without applying."),
+    migrations_dir: Path = typer.Option(
+        Path("migrations"),
+        "--migrations-dir",
+        help="Directory containing migration files.",
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print files without applying."),
 ) -> None:
-    """Apply the initial DuckDB schema."""
+    """Apply DuckDB schema migrations (all in `migrations/` by default, in name order)."""
     import duckdb
 
     settings = get_settings()
-    sql = migration.read_text(encoding="utf-8")
+
+    if migration is not None:
+        files = [migration]
+    else:
+        files = sorted(migrations_dir.glob("*.sql"))
+        if not files:
+            typer.echo(f"no .sql files found in {migrations_dir}", err=True)
+            raise typer.Exit(1)
 
     if dry_run:
-        typer.echo(f"[dry-run] would apply {migration} to {settings.duckdb_path}")
-        typer.echo(sql)
+        typer.echo(f"[dry-run] would apply {len(files)} migration(s) to {settings.duckdb_path}:")
+        for f in files:
+            typer.echo(f"  - {f}")
         raise typer.Exit(0)
 
     settings.duckdb_path.parent.mkdir(parents=True, exist_ok=True)
     with duckdb.connect(str(settings.duckdb_path)) as con:
-        con.execute(sql)
+        for f in files:
+            con.execute(f.read_text(encoding="utf-8"))
+            typer.echo(f"applied {f}")
 
-    typer.echo(f"applied {migration} -> {settings.duckdb_path}")
+    typer.echo(f"-> {settings.duckdb_path}")
 
 
 # --- ingest (Phase 1 placeholders) ------------------------------------------
@@ -88,6 +103,55 @@ def ingest_neighbors(
 ) -> None:
     """Batch-ingest neighbor channels from a list."""
     raise typer.Exit(_not_yet("ingest neighbors", "Phase 1"))
+
+
+@ingest_app.command("resolve-handles")
+def ingest_resolve_handles(
+    file: Path = typer.Option(
+        ..., "--file", "-f",
+        help="Plain-text file with one @handle per line (# comments and blank lines OK).",
+    ),
+    output: Path | None = typer.Option(
+        None, "--output", "-o",
+        help="Optional output file: 'handle UC...' lines for downstream ingest.",
+    ),
+    force_refresh: bool = typer.Option(
+        False, "--force-refresh", help="Bypass cache and re-query the API.",
+    ),
+) -> None:
+    """Resolve @handles to UC... channel IDs (cached in handle_cache)."""
+    from jason.ingestion.handle_resolver import resolve_handles
+
+    handles = [
+        line.strip()
+        for line in file.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    if not handles:
+        typer.echo(f"no handles found in {file}", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"resolving {len(handles)} handles...")
+    results = resolve_handles(handles, force_refresh=force_refresh)
+
+    found = sum(1 for v in results.values() if v)
+    missing = len(results) - found
+
+    for h, ch_id in results.items():
+        marker = ch_id if ch_id else typer.style("NOT FOUND", fg=typer.colors.RED)
+        typer.echo(f"  {h:30s} -> {marker}")
+
+    typer.secho(
+        f"\n{found} resolved, {missing} not found",
+        fg=typer.colors.GREEN if missing == 0 else typer.colors.YELLOW,
+    )
+
+    if output:
+        output.write_text(
+            "\n".join(f"{h} {ch_id}" for h, ch_id in results.items() if ch_id) + "\n",
+            encoding="utf-8",
+        )
+        typer.echo(f"wrote {output}")
 
 
 # --- features (Phase 2) ------------------------------------------------------
