@@ -151,26 +151,46 @@ export default function AvaliarPage() {
 
           <div className="card md:col-span-2">
             <h2 className="text-base mb-1">Por que esse score?</h2>
-            <p className="text-xs text-[var(--muted)] mb-4">
-              O que ajudou (verde) ou atrapalhou (vermelho) a previsão deste
-              título, em ordem de importância.
+            <p className="text-xs text-[var(--muted)] mb-1">
+              Duas referências independentes — leia separado:
+            </p>
+            <ul className="text-xs text-[var(--muted)] mb-4 list-disc list-inside space-y-0.5">
+              <li>
+                <span style={{ color: "#5BC076" }}>▲ ajudou</span> /{" "}
+                <span style={{ color: "var(--accent)" }}>▼ atrapalhou</span> —
+                o modelo previu pro <strong>seu canal</strong> (3.5k subs,
+                padrões da @babygiulybaby)
+              </li>
+              <li>
+                <span className="font-mono">Nicho geral:</span> estatística
+                dos vídeos top-10% nos 25 canais ingeridos
+              </li>
+            </ul>
+            <p className="text-xs mb-4" style={{ color: "#A8A39A" }}>
+              Quando os dois divergem (ex: modelo diz &quot;ajudou&quot; mas
+              nicho diz &quot;abaixo da faixa vencedora&quot;), é sinal real
+              de que seu canal performa diferente do nicho médio.
             </p>
             <div className="space-y-2">
               {result.contributions.map((c, i) => (
                 <div
                   key={i}
-                  className="flex items-center gap-3 py-2 border-b border-[var(--border)] last:border-b-0"
+                  className="flex items-start gap-3 py-2 border-b border-[var(--border)] last:border-b-0"
                 >
                   <span
                     style={{ color: c.color, width: "1rem" }}
-                    className="text-center text-base"
+                    className="text-center text-base mt-0.5"
                   >
                     {c.direction === "up" ? "▲" : "▼"}
                   </span>
                   <div className="flex-1">
                     <div className="text-sm">{c.label}</div>
-                    <div className="text-xs text-[var(--muted)] font-mono">
-                      {c.value} · {c.verb}
+                    <div className="text-xs text-[var(--muted)] font-mono mt-0.5">
+                      {c.value} · {c.verb}{" "}
+                      <span style={{ color: c.color }}>
+                        ({c.contribution >= 0 ? "+" : ""}
+                        {c.contribution.toFixed(2)})
+                      </span>
                     </div>
                     {c.context && (
                       <div className="text-xs mt-1" style={{ color: "#A8A39A" }}>

@@ -176,16 +176,16 @@ def context_for(feature: str, raw_value: Any, *, db_path: Path | None = None) ->
             band = f"{q['p25']/60:.0f}–{q['p75']/60:.0f} min"
             ideal = f"{q['median']/60:.0f} min"
             if pos == "dentro":
-                return f"dentro da faixa típica vencedora ({band}) — ideal ~{ideal}"
-            return f"{pos} da faixa típica vencedora ({band}) — ideal ~{ideal}"
+                return f"Nicho geral: dentro da faixa vencedora ({band}, ideal ~{ideal})"
+            return f"Nicho geral: {pos} da faixa vencedora ({band}, ideal ~{ideal})"
         if feature == "caps_ratio":
             v_pct = v * 100
             p25_pct, p75_pct, med_pct = q["p25"]*100, q["p75"]*100, q["median"]*100
             pos = "abaixo" if v_pct < p25_pct else ("acima" if v_pct > p75_pct else "dentro")
             if pos == "dentro":
-                return f"dentro da faixa vencedora ({p25_pct:.0f}–{p75_pct:.0f}%) — ideal ~{med_pct:.0f}%"
+                return f"Nicho geral: dentro da faixa ({p25_pct:.0f}–{p75_pct:.0f}%, ideal ~{med_pct:.0f}%)"
             return (
-                f"{pos} da faixa vencedora ({p25_pct:.0f}–{p75_pct:.0f}%) "
+                f"Nicho geral: {pos} da faixa ({p25_pct:.0f}–{p75_pct:.0f}%) "
                 f"— outliers usam ~{med_pct:.0f}%"
             )
         if feature == "char_len":
@@ -193,15 +193,15 @@ def context_for(feature: str, raw_value: Any, *, db_path: Path | None = None) ->
             band = f"{q['p25']:.0f}–{q['p75']:.0f}"
             ideal = f"{q['median']:.0f}"
             if pos == "dentro":
-                return f"dentro da faixa vencedora ({band} chars) — ideal ~{ideal}"
-            return f"{pos} da faixa vencedora ({band} chars) — ideal ~{ideal}"
+                return f"Nicho geral: dentro da faixa ({band} chars, ideal ~{ideal})"
+            return f"Nicho geral: {pos} da faixa ({band} chars, ideal ~{ideal})"
         if feature == "word_count":
             pos = "abaixo" if v < q["p25"] else ("acima" if v > q["p75"] else "dentro")
             band = f"{q['p25']:.0f}–{q['p75']:.0f}"
             ideal = f"{q['median']:.0f}"
             if pos == "dentro":
-                return f"dentro da faixa vencedora ({band} palavras) — ideal ~{ideal}"
-            return f"{pos} da faixa vencedora ({band} palavras) — ideal ~{ideal}"
+                return f"Nicho geral: dentro da faixa ({band} palavras, ideal ~{ideal})"
+            return f"Nicho geral: {pos} da faixa ({band} palavras, ideal ~{ideal})"
         # Fallback genérico
         _pos, hint = _classify_quantile(v, q)
         return hint
@@ -215,12 +215,12 @@ def context_for(feature: str, raw_value: Any, *, db_path: Path | None = None) ->
         s = str(raw_value).lower()
         candidate_has = s in ("true", "1", "sim")
         if candidate_has and rate < 0.3:
-            return f"só {pct:.0f}% dos outliers do nicho usam isso — pode estar prejudicando"
+            return f"Nicho geral: só {pct:.0f}% dos outliers usam isso"
         if (not candidate_has) and rate > 0.6:
-            return f"{pct:.0f}% dos outliers do nicho usam — vale considerar"
+            return f"Nicho geral: {pct:.0f}% dos outliers usam — você não usa"
         if candidate_has:
-            return f"{pct:.0f}% dos outliers usam — você está alinhada"
-        return f"só {pct:.0f}% dos outliers usam — sua escolha de não usar é típica"
+            return f"Nicho geral: {pct:.0f}% dos outliers usam — você está alinhada"
+        return f"Nicho geral: só {pct:.0f}% dos outliers usam — sua escolha é típica"
 
     # published_hour — show top-3 horários BRT
     if feature == "published_hour":
@@ -231,16 +231,13 @@ def context_for(feature: str, raw_value: Any, *, db_path: Path | None = None) ->
         try:
             cand_brt = _utc_to_brt(int(float(raw_value)))
         except (TypeError, ValueError):
-            return f"horários fortes do nicho: {', '.join(brt_top)} BRT"
+            return f"Nicho geral: horários mais fortes {', '.join(brt_top)} BRT"
         match_strength = next(
             (n for h, n in top if _utc_to_brt(h) == cand_brt), None,
         )
         if match_strength:
-            return f"horário forte do nicho ({cand_brt:02d}h BRT é top-3)"
-        return (
-            f"você publicaria às {cand_brt:02d}h BRT — "
-            f"horários mais fortes: {', '.join(brt_top)}"
-        )
+            return f"Nicho geral: {cand_brt:02d}h BRT é top-3 dos horários vencedores"
+        return f"Nicho geral: horários mais fortes {', '.join(brt_top)} BRT"
 
     # published_dow — top-3 dias
     if feature == "published_dow":
@@ -254,10 +251,10 @@ def context_for(feature: str, raw_value: Any, *, db_path: Path | None = None) ->
             in_top = cand in [d for d, _ in top]
             cand_name = names[cand] if 0 <= cand <= 6 else str(cand)
         except (TypeError, ValueError):
-            return f"dias mais fortes do nicho: {top_str}"
+            return f"Nicho geral: dias mais fortes {top_str}"
         if in_top:
-            return f"dia forte do nicho ({cand_name} é top-3)"
-        return f"você publicaria {cand_name} — dias mais fortes: {top_str}"
+            return f"Nicho geral: {cand_name} é top-3 dos dias vencedores"
+        return f"Nicho geral: dias mais fortes {top_str}"
 
     # cluster IDs / theme_id / franchise_id / days_to_release: skip
     return ""
