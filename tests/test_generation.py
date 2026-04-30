@@ -9,7 +9,7 @@ import duckdb
 import pytest
 
 from jason.config import get_settings
-from jason.generation.rag import _cosine, search_outliers
+from jason.generation.rag import _cosine, _mmr_select, search_outliers
 from jason.generation.titles import (
     _build_static_prefix,
     _parse_titles,
@@ -143,6 +143,37 @@ def test_search_outliers_with_percentile_pool(tmp_path: Path, monkeypatch: pytes
     assert len(results) == 2
     assert results[0]["video_id"] == "vid_o001"  # closest cosine
     assert all(r["video_id"] != "vid_meh01" for r in results)
+
+
+def test_mmr_lambda_one_degrades_to_top_k_cosine() -> None:
+    """λ=1.0 means pure relevance — pre-sorted top-k order should be preserved."""
+    items = [
+        {"video_id": "a", "similarity": 0.9, "embedding": [1.0, 0.0]},
+        {"video_id": "b", "similarity": 0.8, "embedding": [1.0, 0.0]},  # dup
+        {"video_id": "c", "similarity": 0.7, "embedding": [0.0, 1.0]},
+    ]
+    out = _mmr_select(items, top_k=2, lambda_diversity=1.0)
+    assert [r["video_id"] for r in out] == ["a", "b"]
+
+
+def test_mmr_low_lambda_picks_diverse() -> None:
+    """Pool with 5 near-duplicates + 1 distinct: low-λ MMR keeps top relevant
+    then jumps to the distinct one instead of stacking duplicates."""
+    near_dups = [
+        {"video_id": f"n{i}", "similarity": 0.9 - 0.001 * i,
+         "embedding": [1.0, 0.0]}
+        for i in range(5)
+    ]
+    distinct = {"video_id": "d", "similarity": 0.5, "embedding": [0.0, 1.0]}
+    items = near_dups + [distinct]
+
+    selected = _mmr_select(items, top_k=2, lambda_diversity=0.3)
+    ids = [r["video_id"] for r in selected]
+    # First pick is always the most relevant (n0). Second should be the distinct
+    # one even though its similarity is way lower, because the duplicates'
+    # max_sim_to_selected is 1.0 (perfect dup).
+    assert ids[0] == "n0"
+    assert ids[1] == "d"
 
 
 def test_search_outliers_falls_back_to_views(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

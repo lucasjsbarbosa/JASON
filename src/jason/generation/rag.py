@@ -83,6 +83,47 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return sum(x * y for x, y in zip(a, b, strict=True))
 
 
+def _mmr_select(
+    items: list[dict[str, Any]],
+    *,
+    top_k: int,
+    lambda_diversity: float,
+) -> list[dict[str, Any]]:
+    """Maximal Marginal Relevance selection.
+
+    For each step, picks the candidate that maximizes:
+        score(c) = λ · sim(query, c)  -  (1−λ) · max(sim(c, s) for s in selected)
+
+    Each `items` entry must have `similarity` (vs query) and `embedding`
+    (list[float], L2-normalized — dot equals cosine). When λ=1.0 this
+    degrades to top-k by similarity (sanity check).
+    """
+    if not items:
+        return []
+    if top_k >= len(items):
+        return sorted(items, key=lambda r: r["similarity"], reverse=True)
+
+    pool = sorted(items, key=lambda r: r["similarity"], reverse=True)
+    selected: list[dict[str, Any]] = [pool.pop(0)]
+
+    while pool and len(selected) < top_k:
+        best_idx = 0
+        best_score = -float("inf")
+        for i, c in enumerate(pool):
+            max_sim_to_selected = max(
+                _cosine(c["embedding"], s["embedding"]) for s in selected
+            )
+            score = lambda_diversity * c["similarity"] - (
+                1.0 - lambda_diversity
+            ) * max_sim_to_selected
+            if score > best_score:
+                best_score = score
+                best_idx = i
+        selected.append(pool.pop(best_idx))
+
+    return selected
+
+
 def search_outliers(
     query: str,
     *,
@@ -91,8 +132,17 @@ def search_outliers(
     percentile_threshold: float = 90.0,
     pool_size: int = 200,
     embedder: Callable[[str], list[float]] | None = None,
+    lambda_diversity: float = 0.7,
 ) -> list[dict[str, Any]]:
-    """Return the top_k titles in the niche outlier pool most similar to `query`.
+    """Return `top_k` outlier titles in the niche, balanced via MMR.
+
+    Top-k cosine alone clusters: when the query embeds near a dense region
+    (a specific film), the 20 results end up near-duplicates and Claude
+    receives one structure to riff on. MMR with `lambda_diversity` ∈ [0, 1]
+    iteratively picks items balancing relevance to the query against
+    novelty vs items already chosen:
+
+        score(c) = λ · sim(query, c)  -  (1-λ) · max(sim(c, s) for s in selected)
 
     Args:
         query: free text (transcript summary, theme description, candidate
@@ -103,10 +153,13 @@ def search_outliers(
         pool_size: max size of the outlier pool to embedding-compare against.
         embedder: callable taking str returning list[float] (768d). Defaults
             to lazy-loaded sentence-transformers.
+        lambda_diversity: λ in MMR. 1.0 → pure top-k (no diversity),
+            0.0 → maximum diversity. Default 0.7 trades relevance vs
+            non-redundancy moderately.
 
     Returns:
         List of dicts with `video_id`, `title`, `channel_title`,
-        `percentile`, `multiplier`, `similarity` (cosine).
+        `percentile`, `multiplier`, `similarity` (cosine vs query).
     """
     settings = get_settings()
     db = db_path or settings.duckdb_path
@@ -134,14 +187,19 @@ def search_outliers(
     for vid, title, channel_title, embedding, pct, mult in rows:
         if embedding is None:
             continue
+        emb = list(embedding)
         scored.append({
             "video_id": vid,
             "title": title,
             "channel_title": channel_title,
             "percentile": float(pct),
             "multiplier": float(mult),
-            "similarity": _cosine(qv, list(embedding)),
+            "similarity": _cosine(qv, emb),
+            "embedding": emb,
         })
 
-    scored.sort(key=lambda r: r["similarity"], reverse=True)
-    return scored[:top_k]
+    selected = _mmr_select(scored, top_k=top_k, lambda_diversity=lambda_diversity)
+    # Drop the embedding from the public payload — it's only needed during MMR.
+    for r in selected:
+        r.pop("embedding", None)
+    return selected
