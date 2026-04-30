@@ -24,12 +24,14 @@ app = typer.Typer(
 db_app = typer.Typer(help="Manage the local DuckDB warehouse.", no_args_is_help=True)
 ingest_app = typer.Typer(help="Pull data from YouTube + TMDb (Phase 1).", no_args_is_help=True)
 snapshot_app = typer.Typer(help="Run periodic stats snapshots (Phase 1).", no_args_is_help=True)
+analytics_app = typer.Typer(help="OAuth-gated YouTube Analytics for the canal próprio.", no_args_is_help=True)
 features_app = typer.Typer(help="Compute outlier multipliers, embeddings, topics (Phase 2).", no_args_is_help=True)
 model_app = typer.Typer(help="Train and score the title-multiplier regressor (Phase 3).", no_args_is_help=True)
 
 app.add_typer(db_app, name="db")
 app.add_typer(ingest_app, name="ingest")
 app.add_typer(snapshot_app, name="snapshot")
+app.add_typer(analytics_app, name="analytics")
 app.add_typer(features_app, name="features")
 app.add_typer(model_app, name="model")
 
@@ -346,6 +348,42 @@ def snapshot_run(
 
 
 # --- features (Phase 2) ------------------------------------------------------
+
+
+@analytics_app.command("auth")
+def analytics_auth(
+    force: bool = typer.Option(
+        False, "--force", help="Re-prompt the OAuth flow even if a token exists.",
+    ),
+) -> None:
+    """Run the OAuth flow for YouTube Analytics (canal próprio). Saves token to disk."""
+    from jason.ingestion.youtube_analytics import authenticate
+
+    creds = authenticate(force_reauth=force)
+    settings = get_settings()
+    typer.secho(
+        f"authorized — token saved to {settings.youtube_oauth_token_path}",
+        fg=typer.colors.GREEN,
+    )
+    typer.echo(f"  expiry: {creds.expiry if hasattr(creds, 'expiry') else 'n/a'}")
+
+
+@analytics_app.command("pull")
+def analytics_pull(
+    days: int = typer.Option(30, "--days", help="Lookback window (default 30 days)."),
+) -> None:
+    """Pull daily CTR / AVD / retention from the YouTube Analytics API."""
+    from datetime import UTC, datetime, timedelta
+
+    from jason.ingestion.youtube_analytics import pull_metrics
+
+    end = datetime.now(UTC).date()
+    start = end - timedelta(days=days)
+    result = pull_metrics(start_date=start, end_date=end)
+    typer.secho(
+        f"analytics: {result['rows']} rows persisted ({result['start_date']} → {result['end_date']})",
+        fg=typer.colors.GREEN,
+    )
 
 
 @features_app.command("title")
