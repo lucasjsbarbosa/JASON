@@ -31,6 +31,12 @@ FEATURE_LABELS: dict[str, str] = {
     "char_len":                "Tamanho do título (caracteres)",
     "word_count":              "Quantidade de palavras",
     "sentiment_score":         "Sentimento do título (positivo/negativo)",
+    "arousal_score":           "Intensidade emocional do título",
+    "flesch_reading_ease":     "Facilidade de leitura do título",
+    "thumb_brightness":        "Brilho da thumbnail",
+    "thumb_contrast":          "Contraste da thumbnail",
+    "thumb_colorfulness":      "Vivacidade de cor da thumbnail",
+    "thumb_face_largest_pct":  "Tamanho do maior rosto na thumbnail",
     # Video / channel
     "duration_s":              "Duração do vídeo",
     "subs_bucket":             "Tamanho do canal (faixa de inscritos)",

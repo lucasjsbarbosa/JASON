@@ -188,7 +188,13 @@ def score_title_with_explanation(
     #     subgenre" — it reflects "we didn't run topic detection".
     suppress_features: set[str] = {"theme_id", "franchise_id"}
     if thumb_embedding is None:
+        # No thumbnail uploaded → cluster + aesthetic features are defaults,
+        # not real signal. Hide from explanation.
         suppress_features.add("thumb_cluster")
+        suppress_features.add("thumb_brightness")
+        suppress_features.add("thumb_contrast")
+        suppress_features.add("thumb_colorfulness")
+        suppress_features.add("thumb_face_largest_pct")
     if title_embedding is None:
         suppress_features.add("title_cluster")
 

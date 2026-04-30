@@ -28,7 +28,12 @@ TITLE_FEATURE_COLS = (
     "has_explained_keyword", "has_ranking_keyword",
     "has_curiosity_keyword", "has_extreme_adjective",
     "definite_ref_count", "forward_ref_count", "superlative_density",
-    "sentiment_score",
+    "sentiment_score", "arousal_score", "flesch_reading_ease",
+)
+
+THUMB_FEATURE_COLS = (
+    "thumb_brightness", "thumb_contrast", "thumb_colorfulness",
+    "thumb_face_largest_pct",
 )
 
 # Categorical features (LightGBM handles natively as `category` dtype).
@@ -38,6 +43,7 @@ CATEGORICAL_COLS = ("subs_bucket", "theme_id", "franchise_id", "published_dow")
 # get added at training time and persisted with the artifact).
 SCALAR_FEATURE_COLS = (
     *TITLE_FEATURE_COLS,
+    *THUMB_FEATURE_COLS,
     "duration_s", "published_hour", "days_to_nearest_horror_release",
     "is_halloween_week", "is_friday_13_week",
 )
@@ -112,6 +118,12 @@ def build_feature_matrix(
                COALESCE(f.definite_ref_count, 0)        AS definite_ref_count,
                COALESCE(f.forward_ref_count, 0)         AS forward_ref_count,
                COALESCE(f.superlative_density, 0.0)     AS superlative_density,
+               COALESCE(f.arousal_score, 0.5)           AS arousal_score,
+               COALESCE(f.flesch_reading_ease, 50.0)    AS flesch_reading_ease,
+               COALESCE(f.thumb_brightness, 128.0)      AS thumb_brightness,
+               COALESCE(f.thumb_contrast, 50.0)         AS thumb_contrast,
+               COALESCE(f.thumb_colorfulness, 30.0)     AS thumb_colorfulness,
+               COALESCE(f.thumb_face_largest_pct, 0.0)  AS thumb_face_largest_pct,
                CAST(f.has_number AS INTEGER)            AS has_number,
                CAST(f.has_emoji AS INTEGER)             AS has_emoji,
                CAST(f.has_question_mark AS INTEGER)     AS has_question_mark,
@@ -185,6 +197,16 @@ def assemble_score_row(
         "duration_s": duration_s,
         "subs": subs,
         **{c: feats[c] for c in TITLE_FEATURE_COLS if c in feats},
+        # Defaults for features that need heavy compute (transformer / image
+        # processing). Production scoring of a candidate doesn't run these
+        # on-the-fly; the model receives mid-distribution defaults.
+        "sentiment_score": feats.get("sentiment_score", 0.0),
+        "arousal_score": feats.get("arousal_score", 0.5),
+        "flesch_reading_ease": feats.get("flesch_reading_ease", 50.0),
+        "thumb_brightness": 128.0,
+        "thumb_contrast": 50.0,
+        "thumb_colorfulness": 30.0,
+        "thumb_face_largest_pct": 0.0,
         "theme_id": theme_id,
         "franchise_id": franchise_id,
         "title_embedding": title_embedding,

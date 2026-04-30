@@ -54,6 +54,7 @@ ml = [
     "opencv-python>=4.10",          # frame quality + face detection (Fase 4.5)
     "optuna>=4.8.0",
     "pysentimiento>=0.7.3",
+    "textstat>=0.7.13",
 ]
 
 [tool.ruff]

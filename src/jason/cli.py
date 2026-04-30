@@ -564,6 +564,73 @@ def features_title(
     )
 
 
+@features_app.command("arousal")
+def features_arousal(
+    channel: str | None = typer.Option(
+        None, "--channel", "-c",
+        help="Limit to one channel (UC...). Default: all videos.",
+    ),
+    force: bool = typer.Option(False, "--force", help="Recompute populated."),
+    batch_size: int = typer.Option(128, help="Encoder batch size."),
+) -> None:
+    """Score arousal (intensidade emocional) [0,1] de cada título.
+
+    Berger & Milkman 2012: arousal prediz viralidade melhor que polaridade
+    isolada. Modelo BERTweet PT emotion task. ~500MB. Requer ml group.
+    """
+    import logging as _logging
+    _logging.basicConfig(level=_logging.INFO, format="%(message)s")
+
+    from jason.features.sentiment import compute_arousal
+
+    result = compute_arousal(
+        channel_id=channel, force=force, batch_size=batch_size, show_progress=True,
+    )
+    typer.secho(
+        f"arousal: {result['encoded']} encoded (of {result['requested']} pending)",
+        fg=typer.colors.GREEN,
+    )
+
+
+@features_app.command("readability")
+def features_readability(
+    channel: str | None = typer.Option(None, "--channel", "-c"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    """Flesch reading ease (Fernández-Huerta PT-BR) por título. Pure CPU."""
+    from jason.features.readability import compute_readability
+
+    result = compute_readability(channel_id=channel, force=force)
+    typer.secho(
+        f"readability: {result['computed']} computed (of {result['requested']} pending)",
+        fg=typer.colors.GREEN,
+    )
+
+
+@features_app.command("thumb-aesthetics")
+def features_thumb_aesthetics(
+    channel: str | None = typer.Option(None, "--channel", "-c"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    """Brightness + contrast + colorfulness + face_largest_pct das thumbs.
+
+    Lê arquivos em `data/thumbnails/`. Visual Attributes paper rank #1-3.
+    """
+    import logging as _logging
+    _logging.basicConfig(level=_logging.INFO, format="%(message)s")
+
+    from jason.features.thumb_aesthetics import compute_thumb_aesthetics
+
+    result = compute_thumb_aesthetics(
+        channel_id=channel, force=force, show_progress=True,
+    )
+    typer.secho(
+        f"thumb aesthetics: {result['computed']} computed "
+        f"({result['skipped_invalid']} skipped invalid)",
+        fg=typer.colors.GREEN,
+    )
+
+
 @features_app.command("sentiment")
 def features_sentiment(
     channel: str | None = typer.Option(
