@@ -34,7 +34,10 @@ data/
 canais_ids.txt
 
 # --- Models ------------------------------------------------------------------
-src/jason/models/artifacts/*.lgb
+src/jason/models/artifacts/**/*.lgb
+src/jason/models/artifacts/**/*.pkl
+src/jason/models/artifacts/**/meta.json
+src/jason/models/artifacts/**/best_params.json
 src/jason/models/artifacts/bertopic_*
 
 # --- Claude Code (session state, settings.local.json, etc.) ------------------

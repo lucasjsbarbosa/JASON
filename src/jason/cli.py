@@ -557,18 +557,37 @@ def features_outliers(
 
 
 @model_app.command("train")
-def model_train() -> None:
+def model_train(
+    best_params: bool = typer.Option(
+        False, "--best-params",
+        help="Use hyperparams persisted by `jason model tune`.",
+    ),
+    seeds: int = typer.Option(1, "--seeds", help="Ensemble size (independent boosters)."),
+    stratified: bool = typer.Option(
+        False, "--stratified",
+        help="Per-channel temporal split (default: dataset-wide oldest-vs-newest).",
+    ),
+) -> None:
     """Train the LightGBM multiplier regressor on eligible videos with multipliers.
 
     Requires `uv sync --group ml` and that `jason features outliers` has populated
-    multipliers (which itself requires ~28 days of `jason snapshot run` history).
+    multipliers (which itself requires ~28 days of `jason snapshot run` history,
+    or use `--live` for bootstrap mode).
     """
     import logging as _logging
     _logging.basicConfig(level=_logging.INFO, format="%(message)s")
 
     from jason.models.train import train
-    result = train()
-    typer.echo(f"trained {result.n_train} / val {result.n_val}")
+    from jason.models.tune import load_best_params
+
+    params = load_best_params() if best_params else None
+    if best_params and params is None:
+        typer.secho("--best-params set but no best_params.json found. Run `jason model tune` first.",
+                    fg=typer.colors.YELLOW)
+
+    seed_tuple = tuple(42 + 10000 * i for i in range(max(1, seeds)))
+    result = train(params=params, seeds=seed_tuple, stratify_by_channel=stratified)
+    typer.echo(f"trained {result.n_train} / val {result.n_val} (seeds={seed_tuple}, stratified={stratified})")
     typer.secho(f"  spearman:                       {result.spearman:.4f}", fg=typer.colors.GREEN)
     typer.secho(f"  pairwise intra-bucket accuracy: {result.pairwise_intra_bucket_accuracy:.4f}",
                 fg=typer.colors.GREEN)
@@ -576,6 +595,30 @@ def model_train() -> None:
     typer.echo("  top 8 features by importance:")
     for name, imp in list(result.feature_importance.items())[:8]:
         typer.echo(f"    {name:<30} {imp:>8.0f}")
+
+
+@model_app.command("tune")
+def model_tune(
+    n_trials: int = typer.Option(50, "--n-trials", help="Optuna trial budget."),
+    timeout: int | None = typer.Option(
+        None, "--timeout", help="Wall-clock cap (seconds) on the search.",
+    ),
+) -> None:
+    """Hyperparam search via Optuna (TPE). Persists best_params.json next to artifacts."""
+    import logging as _logging
+    _logging.basicConfig(level=_logging.INFO, format="%(message)s")
+
+    from jason.models.tune import tune
+    typer.echo(f"running optuna search ({n_trials} trials)...")
+    payload = tune(n_trials=n_trials, timeout_seconds=timeout)
+    typer.secho(f"  best pair_acc: {payload['best_score']:.4f}", fg=typer.colors.GREEN)
+    typer.echo("  best params:")
+    for k, v in payload["best_params"].items():
+        if isinstance(v, float):
+            typer.echo(f"    {k:<22} {v:.6f}")
+        else:
+            typer.echo(f"    {k:<22} {v}")
+    typer.echo("\nNext: `jason model train --best-params --seeds 5 --stratified`")
 
 
 @model_app.command("retrain")

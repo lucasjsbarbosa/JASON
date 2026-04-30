@@ -1,0 +1,16 @@
+[theme]
+# Brutalist hauntology — bone on near-black, blood-red used sparingly.
+# No gradients, no glow, no rounded bubbles.
+base = "dark"
+primaryColor = "#B11C19"
+backgroundColor = "#0E0E0E"
+secondaryBackgroundColor = "#161616"
+textColor = "#E8E5DE"
+font = "monospace"
+
+[server]
+headless = true
+runOnSave = true
+
+[browser]
+gatherUsageStats = false

@@ -42,8 +42,17 @@ def _load_artifacts(artifact_dir: Path | None = None) -> dict[str, Any]:
             f"no model artifacts at {art}. Run `jason model train` first."
         )
 
-    booster = lgb.Booster(model_file=str(art / "model.lgb"))
     meta = json.loads((art / "meta.json").read_text(encoding="utf-8"))
+
+    # Ensemble-aware load. Older artifacts (pre-ensemble) only have model.lgb;
+    # newer ones list `seeds` in meta and have model_seed_<s>.lgb per seed.
+    seeds = meta.get("seeds")
+    if seeds:
+        boosters = [
+            lgb.Booster(model_file=str(art / f"model_seed_{s}.lgb")) for s in seeds
+        ]
+    else:
+        boosters = [lgb.Booster(model_file=str(art / "model.lgb"))]
 
     title_km = None
     thumb_km = None
@@ -55,7 +64,7 @@ def _load_artifacts(artifact_dir: Path | None = None) -> dict[str, Any]:
             thumb_km = pickle.load(f)  # noqa: S301
 
     return {
-        "booster": booster,
+        "boosters": boosters,
         "meta": meta,
         "title_kmeans": title_km,
         "thumb_kmeans": thumb_km,
@@ -103,7 +112,7 @@ def score_title(
     """
     settings = get_settings()
     artifacts = _load_artifacts(artifact_dir)
-    booster = artifacts["booster"]
+    boosters = artifacts["boosters"]
     meta = artifacts["meta"]
 
     pub = published_at or datetime.now(UTC).replace(microsecond=0)
@@ -124,5 +133,87 @@ def score_title(
         feature_columns=meta["feature_columns"],
     )
 
-    log_mult = float(booster.predict(X)[0])
+    # Ensemble: average log-space predictions across boosters.
+    log_mult = float(np.mean([b.predict(X)[0] for b in boosters]))
     return {"log_multiplier": log_mult, "multiplier": float(np.expm1(log_mult))}
+
+
+def score_title_with_explanation(
+    title: str,
+    channel_id: str,
+    *,
+    duration_s: int = 600,
+    published_at: datetime | None = None,
+    title_embedding: list[float] | None = None,
+    thumb_embedding: list[float] | None = None,
+    artifact_dir: Path | None = None,
+    db_path: Path | None = None,
+    top_k: int = 5,
+) -> dict[str, Any]:
+    """Score a title AND return per-feature contributions to the prediction.
+
+    LightGBM's `predict(..., pred_contrib=True)` returns SHAP-like values:
+    last column is the base/expected value, others are signed contributions
+    (positive = pushed log_multiplier UP, negative = pushed it DOWN). We
+    average across the ensemble and pick the absolute-largest contributors.
+
+    Returns:
+        dict like score_title's output plus `contributions`: list of
+        `{feature, value, contribution}`, sorted by |contribution|, top_k.
+    """
+    settings = get_settings()
+    artifacts = _load_artifacts(artifact_dir)
+    boosters = artifacts["boosters"]
+    meta = artifacts["meta"]
+
+    pub = published_at or datetime.now(UTC).replace(microsecond=0)
+    row = assemble_score_row(
+        title=title,
+        channel_id=channel_id,
+        published_at=pub,
+        duration_s=duration_s,
+        title_embedding=title_embedding,
+        thumb_embedding=thumb_embedding,
+        db_path=db_path or settings.duckdb_path,
+    )
+    X = _featurize_for_score(
+        row,
+        title_kmeans=artifacts["title_kmeans"],
+        thumb_kmeans=artifacts["thumb_kmeans"],
+        feature_columns=meta["feature_columns"],
+    )
+
+    # Per-feature SHAP-like contributions (averaged across ensemble).
+    # Shape: (n_samples, n_features + 1) — last column is base value.
+    contribs = np.mean(
+        [b.predict(X, pred_contrib=True)[0] for b in boosters], axis=0,
+    )
+    feature_names = meta["feature_columns"]
+    feat_contrib = list(zip(feature_names, contribs[:-1], strict=True))
+    feat_contrib.sort(key=lambda x: abs(x[1]), reverse=True)
+
+    explanation = []
+    for fname, c in feat_contrib[:top_k]:
+        # The actual feature value used at prediction time, for context.
+        import contextlib  # noqa: PLC0415
+        if fname in X.columns:
+            v = X[fname].iloc[0]
+            with contextlib.suppress(AttributeError, ValueError):
+                v = v.item() if hasattr(v, "item") else v
+            value = str(v)
+        else:
+            value = "?"
+        explanation.append({
+            "feature": fname,
+            "value": value,
+            "contribution": float(c),
+            "direction": "up" if c > 0 else "down",
+        })
+
+    log_mult = float(np.mean([b.predict(X)[0] for b in boosters]))
+    return {
+        "log_multiplier": log_mult,
+        "multiplier": float(np.expm1(log_mult)),
+        "contributions": explanation,
+        "base_value": float(contribs[-1]),
+    }
