@@ -84,12 +84,21 @@ def humanize_value(feature: str, raw_value: Any) -> str:
             return s
 
     if feature == "published_hour":
+        # Modelo treinou em UTC (todos os 25 canais são BR — shift constante
+        # de -3h faz o modelo aprender o mesmo padrão). Display converte pra
+        # BRT pra ficar legível.
         try:
-            return f"{int(float(s)):02d}h"
+            utc_h = int(float(s))
+            brt_h = (utc_h - 3) % 24
+            return f"{brt_h:02d}h"
         except (TypeError, ValueError):
             return s
 
     if feature == "published_dow":
+        # Idem: dow em UTC é o que o modelo viu. Pra exibir, se a hora UTC
+        # estiver em [0, 2] o dia local é o anterior — mas como o display
+        # do dow não tem acesso ao hour aqui, mantemos o dow UTC (erro de
+        # ~1/8 dos casos só pra uploads madrugada). Aceito por simplicidade.
         try:
             i = int(float(s))
             return ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"][i] if 0 <= i <= 6 else s
