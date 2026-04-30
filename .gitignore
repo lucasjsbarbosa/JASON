@@ -34,6 +34,9 @@ data/
 src/jason/models/artifacts/*.lgb
 src/jason/models/artifacts/bertopic_*
 
+# --- Claude Code (session state, settings.local.json, etc.) ------------------
+.claude/
+
 # --- IDE / OS ----------------------------------------------------------------
 .vscode/
 .idea/

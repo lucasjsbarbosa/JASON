@@ -157,61 +157,104 @@ Implementar **uma fase por vez**. Não pular pra próxima sem testes da anterior
 - [ ] `config.py` usando `pydantic-settings`
 - [ ] `cli.py` com `typer`, comando placeholder `jason --help` funcional
 - [ ] Schema inicial do DuckDB em `migrations/001_init.sql`:
-  - `channels` (id, handle, title, subs, niche_tag)
-  - `videos` (id, channel_id, title, description, published_at, duration_s, views, likes, comments, thumbnail_url)
-  - `title_tests` (video_id, variant_id, title, thumbnail_path, watch_time_share, is_winner)
-  - `outliers` (video_id, multiplier, computed_at)
+  - `channels` (id, handle, title, subs, niche_tag) — `subs_bucket` é **derivado on-the-fly** de `subs` via helper `bucket_of(subs)` (log-bin: `tier_0` 0-1k, `tier_1` 1k-10k, `tier_2` 10k-100k, `tier_3` 100k-1M, `tier_4` 1M+). Não armazenar como coluna — `subs` cresce com o tempo e bucket cristalizado fica stale (canal de 3.5k vira `tier_2` em meses).
+  - `videos` (id, channel_id, title, description, published_at, duration_s, **is_short**, thumbnail_url) — **sem métricas aqui**. Métricas vivem em snapshot.
+  - `video_stats_snapshots` (video_id, captured_at, days_since_publish, views, likes, comments) — **chave (video_id, captured_at)**. Toda métrica histórica passa por aqui. Job da Fase 1 popula. Multiplier da Fase 2 usa `views_at_28d` (interpolado se não tiver snapshot exato).
+  - `title_tests` (video_id, variant_id, title, thumbnail_path, watch_time_share, **result**, **confidence_pct**) — `result` enum: `winner`, `loser`, `inconclusive`. **Semântica**: pra teste concluído com significância, exatamente 1 linha tem `winner` e as outras N-1 têm `loser`. Pra teste sem significância (Test & Compare deu inconclusive), **todas** as N linhas têm `inconclusive`.
+  - `outliers` (video_id, multiplier, percentile_in_channel, computed_at) — guardar tanto multiplier absoluto quanto percentil intra-canal.
+  - **`migrations/002_horror_releases.sql` vem na Fase 1**, não na Fase 0: tabela `horror_releases` (tmdb_id, title, release_date, release_type, country, ingested_at). Necessária pra `days_to_nearest_horror_release` da Fase 3, mas só é populada quando o ingest TMDb existir.
 - [ ] `pytest` rodando vazio sem erro
 
 ### Fase 1 — Ingestão (2-3 sessões)
 
-- [ ] `youtube_data.py`: cliente que dado um `channel_id`, busca todos os vídeos públicos (paginar com `pageToken`). Respeitar quota: usar `part=snippet,statistics,contentDetails` numa só chamada. Cache local em jsonl antes de inserir no banco.
-- [ ] CLI: `jason ingest channels --ids <id1,id2,...>` — popula `channels` e `videos`.
-- [ ] CLI: `jason ingest neighbors --file canais.txt` — versão batch.
-- [ ] `thumbnails.py`: download da maxres thumbnail de cada vídeo, salva em `data/thumbnails/{video_id}.jpg`. Skip se já existe.
-- [ ] `transcripts.py`: usar `faster-whisper` modelo `large-v3` em GPU se disponível, fallback `medium` em CPU. Só transcrever vídeos do canal próprio + top-50 outliers do nicho (não a base toda — caro). Salvar em `data/transcripts/{video_id}.json`.
-- [ ] `youtube_analytics.py`: OAuth flow (vai exigir interação manual primeira vez — deixar isso documentado no README). Pull diário de CTR, AVD, retention curve do canal próprio.
-- [ ] **Teste de aceitação**: rodar para um canal vizinho conhecido e validar que o número de vídeos no banco bate com o que aparece no YouTube.
+- [ ] `handle_resolver.py` **PRIMEIRO**: dado um `@handle`, devolve `UC...` via `channels.list?forHandle=`. Cache em DuckDB (tabela `handle_cache`). Tem que existir antes de qualquer ingestão.
+- [ ] `youtube_data.py`: cliente que dado um `channel_id`, busca todos os vídeos públicos via `playlistItems` do uploads playlist (paginar com `pageToken`). Respeitar quota: `part=snippet,statistics,contentDetails` numa só chamada. Cache local em jsonl antes de inserir no banco. **Detectar Shorts**: `duration_s <= 60` OU `#shorts` no título/descrição → flag `is_short=true`.
+- [ ] **Job de snapshot diário** (`stats_snapshot.py`): roda `videos.list?part=statistics` em batch de 50 IDs por chamada para todos os vídeos rastreados, escreve linha nova em `video_stats_snapshots` com `captured_at=now`, `days_since_publish=now-published_at`. Esse é o coração da correção do viés de idade — sem ele, todo o ML downstream tá comprometido. Idealmente roda diário; mínimo aceitável é semanal.
+- [ ] CLI: `jason ingest channels --ids <id1,id2,...>` — popula `channels` e `videos` + primeiro snapshot.
+- [ ] CLI: `jason ingest neighbors --file canais.txt` — versão batch (aceita handles, resolve internamente).
+- [ ] CLI: `jason snapshot run` — invoca o job de snapshot manualmente.
+- [ ] `thumbnails.py`: download da maxres thumbnail, salva em `data/thumbnails/{video_id}.jpg`. Skip se já existe.
+- [ ] `transcripts.py`: `faster-whisper` modelo `large-v3` em GPU se disponível, fallback `medium` em CPU. Só transcrever vídeos do canal próprio + top-50 outliers do nicho. Salvar em `data/transcripts/{video_id}.json`.
+- [ ] `youtube_analytics.py`: OAuth flow (interação manual primeira vez — documentar no README). Pull diário de CTR, AVD, retention curve do canal próprio.
+- [ ] **`migrations/002_horror_releases.sql` + ingest TMDb release calendar**: cria tabela `horror_releases` (tmdb_id, title, release_date, release_type, country, ingested_at). CLI `jason ingest tmdb-releases --window-past 365 --window-future 180` puxa releases de horror dos últimos 12 meses + próximos 6 meses (filtrado por `with_genres=27` Horror, `with_release_type=3,4` theatrical/digital). Pré-requisito da feature `days_to_nearest_horror_release` da Fase 3.
+- [ ] **Teste de aceitação**: rodar para um canal vizinho conhecido e validar que o número de vídeos no banco bate com o YouTube. Rodar snapshot 2x em dias diferentes e validar que existem 2 linhas por vídeo em `video_stats_snapshots` com `views` crescentes.
 
 ### Fase 2 — Feature engineering (1-2 sessões)
 
-- [ ] `outliers.py`: função `compute_multiplier(channel_id, window_days=90)` — para cada vídeo, calcula `views / mediana_dos_últimos_30_vídeos_anteriores_a_ele`. Salva em `outliers`.
-- [ ] `title_features.py`: extrai por título: `char_len`, `word_count`, `has_number`, `has_emoji`, `has_question_mark`, `has_caps_word`, `sentiment_score` (usar `pysentimiento` ou similar para PT-BR), `has_first_person` (eu/meu/minha).
+- [ ] `outliers.py`:
+  - **Função `views_at_age(video_id, target_days=28)`**: dado um vídeo e uma idade-alvo (ex: 28 dias), retorna `views` interpolados linearmente entre os dois snapshots mais próximos em `video_stats_snapshots`. Vídeos com idade < target_days são **excluídos** do cálculo de outlier (não há sinal estabilizado ainda).
+  - **Função `compute_multiplier(channel_id)`**: para cada vídeo elegível do canal, `multiplier = views_at_28d / mediana(views_at_28d dos 30 vídeos imediatamente anteriores do mesmo canal)`. Salva em `outliers.multiplier`. **Fallback**: se houver menos de **10 vídeos anteriores elegíveis** (ex: canal jovem ou janela de snapshots ainda não madura), `multiplier = NULL` e o vídeo **não** entra em `outliers` — sem baseline confiável o sinal é ruído.
+  - **Função `compute_percentile(channel_id, window_days=90)`**: para cada vídeo do canal, calcula seu percentil de multiplier dentro da janela. Salva em `outliers.percentile_in_channel`. Outlier "oficial" = percentil ≥ 90 dentro do canal — não threshold absoluto. Mantemos o multiplier numérico como feature, mas a flag categórica é por percentil.
+- [ ] `title_features.py`: extrai por título: `char_len`, `word_count`, `has_number`, `has_emoji`, `has_question_mark`, `has_caps_word`, `caps_ratio` (% de caracteres em maiúscula), `sentiment_score` (`pysentimiento` PT), `has_first_person` (eu/meu/minha), e específicas do nicho: `has_explained_keyword` (regex: explicado|final explicado|entenda|explicação), `has_ranking_keyword` (top|melhores|piores|ranking), `has_curiosity_keyword` (você não sabia|ninguém fala|verdade por trás|por que), `has_extreme_adjective` (perturbador|insano|absurdo|chocante|aterrorizante).
 - [ ] `embeddings.py`:
-  - Títulos: `paraphrase-multilingual-mpnet-base-v2`, salva em coluna `title_embedding` (array float32, 768 dim).
-  - Thumbnails: OpenCLIP `ViT-B-32`, salva em `thumb_embedding` (512 dim).
-- [ ] `topics.py`: roda BERTopic sobre todos os títulos do nicho, gera `topic_id` e `topic_label` por vídeo. Persistir o modelo BERTopic em `models/artifacts/`.
+  - Títulos: `paraphrase-multilingual-mpnet-base-v2`, salva `title_embedding` (768 dim).
+  - Thumbnails: OpenCLIP `ViT-B-32`, salva `thumb_embedding` (512 dim).
+- [ ] `topics.py`: BERTopic em **duas camadas**:
+  - Camada A (temas): roda sobre títulos com nomes próprios mascarados (NER + matching contra base de filmes — pode ser TMDb aqui ou simplesmente lista manual de franquias populares de terror). Captura *temas* (possessão, slasher, found footage).
+  - Camada B (franquias): roda sobre títulos crus. Captura *franquias virais* (Invocação do Mal, Sobrenatural, Hereditário).
+  - Cada vídeo recebe `theme_id` e `franchise_id`. Os dois entram como features no modelo da Fase 3. **`theme_id` da Camada A funciona como proxy de subgênero** — não precisa do TMDb pra isso.
 - [ ] CLI: `jason features compute --all`
-- [ ] **Teste**: query `SELECT topic_label, AVG(multiplier) FROM videos JOIN outliers USING(video_id) GROUP BY 1 ORDER BY 2 DESC LIMIT 10` deve retornar tópicos com média de multiplier sensata (não NaN, não tudo zero).
+- [ ] **Teste**: query `SELECT theme_label, AVG(multiplier), COUNT(*) FROM videos JOIN outliers USING(video_id) JOIN themes USING(theme_id) GROUP BY 1 HAVING COUNT(*) >= 5 ORDER BY 2 DESC LIMIT 10` deve retornar temas com multiplier sensato e separar slasher de found footage de possessão.
 
 ### Fase 3 — Modelo preditivo (1 sessão)
 
-- [ ] `train.py`: LightGBM regressor com target = `log1p(multiplier)`. Features: tudo de `title_features` + cluster do title_embedding (k-means k=20) + cluster do thumb_embedding + `topic_id` + `duration_s` + `published_hour` + `published_dow`.
-- [ ] Split temporal (não aleatório — mais antigo no train, mais recente no val). Métrica: Spearman correlation no val set + ranking accuracy quando comparamos pares de vídeos do mesmo canal.
+- [ ] `train.py`: LightGBM regressor com target = `log1p(multiplier)`. **Filtrar Shorts** do treino — `WHERE is_short = false`. Se houver volume razoável de Shorts (>500), treinar modelo separado depois.
+- [ ] **Features**:
+  - Tudo de `title_features` (incluindo as flags específicas do nicho).
+  - Cluster do `title_embedding` (k-means k=20).
+  - Cluster do `thumb_embedding` (k-means k=20).
+  - `theme_id` (Camada A do BERTopic — proxy de subgênero).
+  - `franchise_id` (Camada B — pega o pico de viralidade de franquias hot).
+  - `duration_s`, `published_hour`, `published_dow`.
+  - **`subs_bucket`** do canal — derivado on-the-fly de `channels.subs` via `bucket_of()`, não armazenado. Corrige o problema de aprender só padrão de canal grande.
+  - **`days_to_nearest_horror_release`**: distância em dias do release de filme/série de terror grande mais próximo. Precisa de ingest do TMDb release calendar (filtrado por `genres=Horror` + `with_release_type=3,4` para estréia em cinema/streaming) — adicionar no fim da Fase 1. Halloween e Sexta-13 ficam como features booleanas separadas (`is_halloween_week`, `is_friday_13_week`), bonus.
+- [ ] **Split temporal**: ordenar por `published_at`, 80% mais antigos → train, 20% mais recentes → val. Não aleatório.
+- [ ] **Métricas**:
+  - Spearman correlation no val (saúde geral).
+  - **Pairwise ranking accuracy intra-`subs_bucket`**: pares de vídeos do mesmo bucket de tamanho de canal — dos pares onde o modelo prediz qual é o melhor, quantos % acerta? Esse é o número que importa, porque ranquear título de canal de 3.5k pelos padrões de canal de 3M é exatamente o erro a evitar.
 - [ ] Gravar feature importance, salvar modelo em `models/artifacts/multiplier_v1.lgb`.
-- [ ] `predict.py`: função `score_title(title: str, channel_id: str, thumbnail_path: str | None = None) -> float`.
+- [ ] `predict.py`: função `score_title(title, channel_id, thumbnail_path=None) -> float`. Internamente lê `channels.subs` e computa `subs_bucket = bucket_of(subs)` na hora pra usar como feature.
 - [ ] CLI: `jason model train` e `jason model score --title "..." --channel ...`.
-- [ ] **Importante**: o modelo NÃO precisa prever views absolutos bem (variância gigante). Precisa **ranquear** candidatos. Use ranking metrics no val.
+- [ ] **Importante**: o modelo NÃO precisa prever views absolutos bem (variância gigante). Precisa **ranquear** candidatos dentro de uma escala parecida com a do canal alvo. A métrica intra-bucket é o que valida isso.
 
 ### Fase 4 — Geração de títulos (1 sessão)
 
-- [ ] `rag.py`: dado um tópico ou transcrição, calcula embedding, faz busca por similaridade nos top-200 outliers do nicho (multiplier ≥ 3), retorna os 20 mais similares.
-- [ ] `titles.py`: prompt para Claude com:
-  - Contexto do canal (tom, nicho, exemplos de títulos vencedores próprios)
-  - 20 títulos outliers do nicho como referência de estrutura (não para copiar, para extrair padrões)
-  - Resumo de 200 palavras da transcrição do vídeo novo
-  - Instrução: gerar 10 títulos em PT-BR, no estilo do canal, com diversidade de estrutura (curiosidade, lista, contraste, primeira pessoa, etc.)
-- [ ] Pipeline completo: `jason suggest --transcript caminho.txt` → 10 títulos gerados → ranqueados pelo modelo da Fase 3 → top 3 retornados com score.
+- [ ] `rag.py`: dado um tópico ou transcrição, calcula embedding, faz busca por similaridade nos top-200 vídeos do nicho com `percentile_in_channel >= 90` (ou seja, outliers reais), retorna os 20 mais similares.
+- [ ] `titles.py`: prompt para Claude estruturado em **partes estáticas + variável** para usar prompt caching:
+  - **Estático (com `cache_control: {"type": "ephemeral"}`)**:
+    1. System: instrução de papel, regras de geração (estilo do canal, PT-BR, diversidade de estrutura).
+    2. Contexto do canal: tom, nicho, exemplos de títulos vencedores próprios da @babygiulybaby.
+    3. 20 títulos outliers do nicho como referência de estrutura (atualizados semanalmente, mas estáveis dentro de uma sessão).
+  - **Variável (sem cache)**:
+    4. Resumo de 200 palavras da transcrição do vídeo novo + tema/franquia detectada.
+  - Esse split corta ~80% do custo a partir da segunda chamada e melhora latência. Documentação Anthropic: `https://docs.claude.com/en/docs/build-with-claude/prompt-caching`.
+- [ ] Pipeline completo: `jason suggest --transcript caminho.txt` → 10 títulos gerados → ranqueados pelo modelo da Fase 3 (passando o `channel_id` próprio para o `subs_bucket` correto) → top 3 retornados com score + percentil estimado dentro do `subs_bucket`.
 - [ ] Persistir cada sugestão em tabela `suggestions` para fechar o loop depois.
+
+### Fase 4.5 — Seleção de thumbnails (1 sessão)
+
+Thumbnail é o maior driver de CTR no YouTube — maior que título. JASON não vai gerar thumbnails do zero (caro, qualidade inconsistente), mas vai **sugerir frames candidatos do próprio vídeo** alinhados com padrões vencedores do nicho.
+
+- [ ] `frame_extractor.py`: dado o vídeo (precisa do arquivo local ou URL para `yt-dlp` baixar versão de baixa resolução), usa `ffmpeg` para extrair candidatos:
+  - Frames a cada 5% da duração (20 candidatos base).
+  - Filtros: descartar frames muito escuros (média de luminância < threshold) e muito borrados (variância de Laplaciano baixa).
+- [ ] `frame_scorer.py`:
+  - **Score de saliência**: `face-detection` via `mediapipe` ou `retinaface`. Frames com 1-2 rostos grandes e centralizados ganham boost (padrão de packaging vencedor no nicho de terror — reaction face funciona muito).
+  - **Score de similaridade com outliers do nicho**: embedding CLIP do frame vs cluster centroid das thumbnails de vídeos com `percentile_in_channel >= 90` no mesmo `theme_id`. Maior similaridade = mais alinhado com o que viraliza nesse subgênero.
+  - **Score combinado**: `0.4 * face_score + 0.6 * outlier_similarity` (ajustar pesos depois).
+- [ ] `text_overlay_advisor.py`: sugere padrão de overlay de texto baseado nas thumbnails outliers do mesmo `theme_id`. Output é declarativo, não imagem renderizada — exemplo: `{"text_present": true, "text_position": "top_left", "text_color": "yellow", "max_words": 3, "examples": ["EXPLICADO", "FINAL", "PERTURBADOR"]}`. A pessoa edita no Photoshop/Canva. Não tentar gerar a thumb finalizada — escopo vira muito maior.
+- [ ] CLI: `jason thumbs suggest --video-path <path>` → top 3 frames + arquivo JSON com sugestão de overlay. Salvar em `data/thumb_suggestions/{video_id}/`.
+- [ ] **Importante**: não tentar usar modelos generativos (DALL-E, SD) na v1. Frame real do vídeo + sugestão de overlay é 80% do valor com 20% da complexidade.
 
 ### Fase 5 — Dashboard (1 sessão)
 
-Streamlit com 4 abas:
+Streamlit com 5 abas:
 
-1. **Outliers do nicho** — tabela ranqueada por multiplier dos últimos 30 dias, filtro por canal, link para o vídeo no YT, thumbnail inline. Esse é o "feed do que o algoritmo está empurrando".
-2. **Performance própria** — gráfico de CTR, AVD, retention dos vídeos dela ao longo do tempo (puxa do Analytics API).
-3. **Title scorer** — input livre: cola um título, retorna score do modelo + percentil no nicho.
+1. **Outliers do nicho** — tabela ranqueada por `percentile_in_channel` dos últimos 30 dias, filtro por canal e por `theme_id`, link pro vídeo no YT, thumbnail inline. Esse é o "feed do que o algoritmo está empurrando".
+2. **Performance própria** — gráfico de CTR, AVD, retention dos vídeos dela ao longo do tempo (puxa do Analytics API). Sobreposição: linha do tempo de releases de filme/série de terror grandes (TMDb) — fica fácil ver picos de visualização correlacionados com lançamentos.
+3. **Title scorer** — input livre: cola um título, retorna score do modelo + percentil estimado dentro do `subs_bucket` do canal.
 4. **Sugerir título** — upload de transcrição (ou cola texto), retorna top 3 títulos com explicação.
+5. **Sugerir thumbnail** — upload do vídeo (ou path local), retorna top 3 frames candidatos + sugestão de overlay de texto.
 
 ### Fase 6 — Loop de feedback (1 sessão)
 
@@ -241,13 +284,12 @@ A primeira execução vai abrir browser para consentimento. Salvar token em `~/.
 - Stopwords PT-BR via `nltk.corpus.stopwords.words('portuguese')`, mas para títulos de YT não filtrar muito — palavras curtas ("eu", "meu") são features importantes.
 
 **Especificidades do nicho de terror (importante):**
-- **Títulos do nicho costumam usar CAPS, números altos e adjetivos extremos**: "O FILME MAIS PERTURBADOR JÁ FEITO", "10 CENAS QUE FORAM CORTADAS DE...", "POR QUE NINGUÉM FALA DESSE FILME". Isso vai dominar as features de `has_caps_word` e `sentiment_score` extremo. **Não filtrar isso como ruído** — é o sinal real do nicho.
-- **Nomes de filmes confundem topic modeling**: BERTopic pode agrupar todos os vídeos sobre "Invocação do Mal" num tópico só, separado de "filmes de possessão demoníaca em geral". Mitigação: rodar BERTopic em duas camadas — uma com nomes próprios mascarados (substituir títulos de filmes por `<MOVIE>` usando NER ou matching contra base do TMDb), outra sem mascarar. A primeira captura *temas*, a segunda captura *franquias virais*.
-- **Sazonalidade forte**: Halloween (out) e Sexta-feira 13 são picos previsíveis. Adicionar feature `days_to_halloween` e `is_friday_13th_week` no modelo da Fase 3.
-- **Lançamentos de cinema/streaming dominam outliers**: muitos outliers do nicho são vídeos sobre filmes que acabaram de sair (ex: novo Final Destination, novo A24 horror). O sistema deve cruzar com calendário de lançamentos — adicionar na Fase 1+ um ingest do TMDb para filmes/séries de terror lançados nos próximos 90 dias.
-- **Subgênero importa muito para CTR**: filmes de possessão, slashers, terror psicológico, found footage — cada um tem audiência diferente. Tag de subgênero deve ser uma feature explícita. Pode vir do TMDb (`genres` + `keywords`).
-- **Spoilers e formato afetam packaging**: títulos com "EXPLICADO", "FINAL EXPLICADO", "TUDO QUE VOCÊ NÃO ENTENDEU" performam bem no nicho. Adicionar features booleanas: `has_explained_keyword`, `has_ranking_keyword` ("top", "melhores", "piores"), `has_curiosity_keyword` ("você não sabia", "ninguém fala", "verdade por trás").
-- **Avoid copyright traps**: o canal lida com clipes de filmes — o sistema NÃO deve sugerir reproduzir trechos de roteiros, letras de músicas de trilhas, ou texto extenso de sinopses oficiais. Restringir geração a títulos e descrições originais.
+- **Títulos do nicho costumam usar CAPS, números altos e adjetivos extremos**: "O FILME MAIS PERTURBADOR JÁ FEITO", "10 CENAS QUE FORAM CORTADAS DE...", "POR QUE NINGUÉM FALA DESSE FILME". Isso vai dominar as features de `caps_ratio` e `has_extreme_adjective`. **Não filtrar isso como ruído** — é o sinal real do nicho.
+- **Nomes de filmes confundem topic modeling**: por isso a Fase 2 usa BERTopic em duas camadas — Camada A com nomes mascarados (captura *temas*: possessão, slasher, found footage), Camada B sem mascarar (captura *franquias virais*: Invocação do Mal, Hereditário). O `theme_id` da Camada A funciona como **proxy de subgênero** — não precisa de TMDb pra isso. TMDb fica reservado pra outra coisa: release calendar.
+- **Lançamentos de cinema/streaming são o maior driver sazonal** — muito mais forte que datas fixas. Por isso a feature `days_to_nearest_horror_release` (vinda do TMDb release calendar, filtrado por gênero Horror + tipo de release theatrical/digital) é a feature sazonal de maior peso. Halloween e Sexta-13 ficam como features booleanas separadas, secundárias.
+- **Subgênero precisão fina**: se em algum momento o `theme_id` do BERTopic não estiver granular o suficiente (ex: agrupar slasher e found footage juntos), aí sim vale anotar manualmente uma taxonomia de ~15 subgêneros e classificar via embedding do título+descrição. Mas adiar — começa com BERTopic e mede.
+- **Spoilers e formato afetam packaging**: features `has_explained_keyword`, `has_ranking_keyword`, `has_curiosity_keyword` (definidas na Fase 2) capturam isso.
+- **Avoid copyright traps**: o canal lida com clipes de filmes — JASON NÃO deve sugerir reproduzir trechos de roteiros, letras de músicas de trilhas, ou texto extenso de sinopses oficiais. Restringir geração a títulos e descrições originais.
 
 **Sobre clickbait vs. quality:**
 O modelo treinado em multiplier pode aprender padrões clickbait. Mitigação: o YouTube Test & Compare decide por **watch-time share**, não cliques. Então mesmo que a gente sugira títulos clickbait, o A/B real penaliza eles. O loop de feedback corrige naturalmente.
@@ -280,7 +322,25 @@ O modelo treinado em multiplier pode aprender padrões clickbait. Mitigação: o
 
 Começar pela **Fase 0**. Antes de escrever qualquer código:
 
-1. Confirme que entendeu a arquitetura me explicando em 5 linhas, destacando como o nicho de terror muda algumas escolhas (sazonalidade, subgêneros, mascaramento de nomes de filmes no topic modeling).
-2. Liste exatamente quais variáveis de ambiente eu vou precisar configurar — incluir já uma `TMDB_API_KEY` (chave grátis em `themoviedb.org/settings/api`) porque a Fase 1+ vai precisar.
+1. Confirme que entendeu a arquitetura me explicando em 5 linhas, destacando como o nicho de terror muda algumas escolhas (sazonalidade via release calendar, BERTopic em duas camadas, mascaramento de nomes de filmes).
+2. Liste exatamente quais variáveis de ambiente eu vou precisar configurar — incluir já uma `TMDB_API_KEY` (chave grátis em `themoviedb.org/settings/api`) porque a Fase 1 vai precisar pro release calendar.
 3. Implemente o utilitário `handle_resolver.py` LOGO no início da Fase 1, antes de ingerir vídeos — assim eu consigo passar a lista de handles do CLAUDE.md direto e ele resolve para IDs com cache.
 4. Aí sim começar o setup propriamente dito.
+
+---
+
+## 9. Changelog do spec
+
+Mudanças aplicadas após primeira revisão técnica (registrar aqui qualquer mudança estrutural pra contextualizar escolhas):
+
+- **v1.1**: separação de métricas em `video_stats_snapshots` (corrige viés de idade no multiplier — vídeo antigo não pode ser outlier só por ter acumulado mais views). Multiplier passa a ser calculado em `views_at_28d`. Outlier oficial passa a ser percentil ≥ 90 intra-canal, não threshold absoluto.
+- **v1.1**: feature `subs_bucket` no canal + métrica de avaliação intra-bucket. Resolve o problema de treinar com mistura de canais 1k e 3M e ranquear por padrão de canal grande.
+- **v1.1**: flag `is_short` + filtragem de Shorts no treino do modelo de long-form. Distribuições incompatíveis.
+- **v1.1**: adicionada Fase 4.5 (seleção de thumbnails) — frame extraction + scoring por similaridade com outliers do nicho. Thumbnail é o maior driver de CTR e estava ausente da pipeline de output.
+- **v1.1**: prompt caching no Claude na Fase 4 (partes estáticas com `cache_control: ephemeral`).
+- **v1.1**: TMDb usado para release calendar (sazonalidade), não para subgênero. Subgênero vem do BERTopic Camada A.
+- **v1.1**: `title_tests.result` mudou de boolean para enum (`winner`/`loser`/`inconclusive`) + `confidence_pct`.
+- **v1.2**: `subs_bucket` deixou de ser coluna armazenada em `channels` — agora computado on-the-fly via `bucket_of(subs)`. Razão: subs cresce (3.5k → 10k é mudança de tier) e bucket cristalizado fica stale, contaminando features futuras.
+- **v1.2**: clarificada semântica de `title_tests.result` — pra teste concluído: 1 linha winner + N-1 loser; pra teste inconclusive: TODAS as N linhas com `inconclusive`. Evita ambiguidade na ingestão dos resultados do Test & Compare.
+- **v1.2**: `compute_multiplier` agora tem fallback explícito — < 10 vídeos anteriores elegíveis → `multiplier = NULL` e vídeo não entra em `outliers`. Sem baseline confiável o sinal vira ruído (canal jovem, primeiros meses).
+- **v1.2**: chamada explícita de `migrations/002_horror_releases.sql` + ingest TMDb adicionada à Fase 1, e referenciada na Fase 0 como dependência futura. Antes ficava implícita só na descrição da Fase 3.
