@@ -232,6 +232,7 @@ def train(
     stratify_by_channel: bool = False,
     num_boost_round: int = 500,
     persist: bool = True,
+    drop_features: list[str] | None = None,
 ) -> TrainResult:
     """Train the multiplier regressor end-to-end and persist artifacts.
 
@@ -246,6 +247,9 @@ def train(
             20% rather than dataset-wide. Avoids channels-only-in-val bias.
         persist: when False (used by tune()), runs the full pipeline but
             doesn't write artifacts.
+        drop_features: optional list of feature column names to remove from
+            the training matrix before fitting. Used by ablation experiments
+            to test "is feature X carrying real signal?".
     """
     import numpy as np  # noqa: PLC0415
 
@@ -276,6 +280,13 @@ def train(
     X_va = _featurize(val_df, title_kmeans=title_km, thumb_kmeans=thumb_km)
     y_tr = train_df["target"].values
     y_va = val_df["target"].values
+
+    if drop_features:
+        drop = [c for c in drop_features if c in X_tr.columns]
+        if drop:
+            X_tr = X_tr.drop(columns=drop)
+            X_va = X_va.drop(columns=drop)
+            logger.info("ablation: dropped %d features: %s", len(drop), drop)
 
     cat_features = [c for c in X_tr.columns if str(X_tr[c].dtype) == "category"]
 

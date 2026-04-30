@@ -1,0 +1,63 @@
+{
+  "bucket_distribution": {
+    "4": 5990,
+    "3": 4878,
+    "1": 1502,
+    "2": 3529,
+    "0": 199
+  },
+  "results": {
+    "baseline": {
+      "n_train": 12879,
+      "n_val": 3219,
+      "spearman": 0.3238206614225048,
+      "pairwise_intra_bucket_accuracy": 0.620021008770691,
+      "feature_importance_top": {
+        "days_to_nearest_horror_release": 15743.0,
+        "caps_ratio": 13377.0,
+        "duration_s": 12813.0,
+        "char_len": 9934.0,
+        "published_hour": 5852.0,
+        "word_count": 5715.0,
+        "title_cluster": 2987.0,
+        "thumb_cluster": 2907.0
+      }
+    },
+    "no_calendar": {
+      "n_train": 12879,
+      "n_val": 3219,
+      "spearman": 0.2972051222254979,
+      "pairwise_intra_bucket_accuracy": 0.6094809811445611,
+      "feature_importance_top": {
+        "caps_ratio": 11579.0,
+        "duration_s": 11299.0,
+        "char_len": 10643.0,
+        "word_count": 5302.0,
+        "thumb_cluster": 2159.0,
+        "title_cluster": 2031.0,
+        "has_number": 1262.0,
+        "franchise_id": 1261.0
+      }
+    },
+    "no_calendar_no_duration": {
+      "n_train": 12879,
+      "n_val": 3219,
+      "spearman": 0.23260179700963307,
+      "pairwise_intra_bucket_accuracy": 0.5839079810463766,
+      "feature_importance_top": {
+        "caps_ratio": 13011.0,
+        "char_len": 10058.0,
+        "word_count": 7029.0,
+        "thumb_cluster": 2063.0,
+        "title_cluster": 2055.0,
+        "has_number": 1365.0,
+        "theme_id": 1280.0,
+        "franchise_id": 1208.0
+      }
+    }
+  },
+  "deltas": {
+    "baseline_to_no_calendar": -0.010540027626129933,
+    "no_calendar_to_no_calendar_no_duration": -0.025573000098184417
+  }
+}
