@@ -96,7 +96,9 @@ def download_all(
     db = db_path or settings.duckdb_path
     out_dir = target_dir or (settings.data_dir / "thumbnails")
 
-    with duckdb.connect(str(db)) as con:
+    # We only read videos.thumbnail_url here — open read-only so this can run
+    # alongside the Streamlit dashboard (which holds its own read connection).
+    with duckdb.connect(str(db), read_only=True) as con:
         targets = _read_thumbnail_targets(con, channel_id)
 
     if not targets:

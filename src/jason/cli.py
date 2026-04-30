@@ -722,13 +722,33 @@ def thumbs_suggest(
 
 
 @app.command("dashboard")
-def dashboard() -> None:
+def dashboard(
+    port: int = typer.Option(8501, help="Port for the Streamlit server."),
+) -> None:
     """Launch the Streamlit dashboard. Convenience wrapper for streamlit run."""
     import subprocess
     import sys
     from pathlib import Path
     app_path = Path(__file__).parent / "dashboard" / "app.py"
-    subprocess.run([sys.executable, "-m", "streamlit", "run", str(app_path)], check=True)
+
+    # Streamlit's first-run flow blocks on a stdin "Email: " prompt and on
+    # opening a browser tab — neither is wanted from the CLI wrapper. Drop
+    # an empty credentials file (idempotent) so the email prompt is bypassed,
+    # and pass --server.headless to skip the browser tab.
+    creds = Path.home() / ".streamlit" / "credentials.toml"
+    if not creds.exists():
+        creds.parent.mkdir(parents=True, exist_ok=True)
+        creds.write_text('[general]\nemail = ""\n', encoding="utf-8")
+
+    subprocess.run(
+        [
+            sys.executable, "-m", "streamlit", "run", str(app_path),
+            "--server.headless=true",
+            "--server.port", str(port),
+            "--browser.gatherUsageStats=false",
+        ],
+        check=True,
+    )
 
 
 if __name__ == "__main__":
