@@ -559,6 +559,23 @@ def model_train() -> None:
         typer.echo(f"    {name:<30} {imp:>8.0f}")
 
 
+@model_app.command("retrain")
+def model_retrain() -> None:
+    """Retrain the regressor — alias for `model train`. Use after new A/B
+    test results land in `title_tests` (Fase 6 feedback loop)."""
+    import logging as _logging
+    _logging.basicConfig(level=_logging.INFO, format="%(message)s")
+
+    from jason.models.train import train
+    typer.echo("retraining multiplier regressor on current data...")
+    result = train()
+    typer.secho(
+        f"  retrain done: spearman={result.spearman:.4f} "
+        f"intra_bucket_acc={result.pairwise_intra_bucket_accuracy:.4f}",
+        fg=typer.colors.GREEN,
+    )
+
+
 @model_app.command("score")
 def model_score(
     title: str = typer.Option(..., "--title"),

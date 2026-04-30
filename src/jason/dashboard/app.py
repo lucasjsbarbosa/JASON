@@ -194,15 +194,97 @@ def _tab_suggest_title() -> None:
 
 def _tab_suggest_thumb() -> None:
     st.header("Sugerir thumbnail")
-    st.caption("Fase 4.5 — pendente. Seleção de frames via ffmpeg + scoring "
-               "vs centroides de outliers do mesmo theme_id.")
-    st.info("Esta aba será ativada quando `jason thumbs suggest` for implementado.")
+    st.caption("Use o CLI: `jason thumbs suggest --video-path video.mp4 --top-k 3`. "
+               "Saída: top-3 frames extraídos via ffmpeg + JSON com sugestão de overlay.")
+
+    st.markdown("""
+**Pipeline atual:**
+1. ffmpeg extrai 20 frames espaçados em 5–95% da duração
+2. Filtra dark/blurry (luminância + variância de Laplaciano)
+3. Score combinado: `0.4 * face_score (Haar) + 0.6 * cosine vs centroide de outlier thumbs`
+4. Salva top-3 frames + `overlay_suggestion.json`
+
+Quando você tiver os top-3 frames, edite o overlay no Photoshop/Canva
+seguindo a sugestão (texto em CAPS, posição, exemplos do nicho).
+    """)
+
+
+def _tab_ab_test_log() -> None:
+    """Fase 6 — formulário pra inserir resultados do Test & Compare nativo do YouTube."""
+    st.header("Loop de feedback (Test & Compare)")
+    st.caption("Insira aqui o resultado do A/B test nativo do YouTube depois "
+               "que ele fechar (5–7 dias). Esses sinais entram no retreino "
+               "com peso forte (`jason model retrain`).")
+
+    settings = get_settings()
+    con = _con()
+
+    with st.form("ab_test_form"):
+        video_id = st.text_input("Video ID (11 chars)", placeholder="dQw4w9WgXcQ")
+        col1, col2 = st.columns(2)
+        title_a = col1.text_input("Variante A — título")
+        title_b = col2.text_input("Variante B — título")
+        wts_a = col1.number_input("Variante A — watch_time_share (0..1)", min_value=0.0, max_value=1.0, value=0.5, step=0.01)
+        wts_b = col2.number_input("Variante B — watch_time_share (0..1)", min_value=0.0, max_value=1.0, value=0.5, step=0.01)
+        result_kind = st.radio(
+            "Resultado",
+            ["winner_loser", "inconclusive"],
+            horizontal=True,
+            help="winner_loser: Test & Compare achou diferença significativa; "
+                 "inconclusive: ficou indefinido.",
+        )
+        winner_variant = st.radio("Vencedor (se houver)", ["A", "B"], horizontal=True)
+        confidence = st.number_input("Confidence (%)", min_value=0.0, max_value=100.0, value=80.0)
+        submitted = st.form_submit_button("Salvar")
+
+    if submitted:
+        if not video_id or not title_a or not title_b:
+            st.error("Preencha video_id e os dois títulos.")
+            return
+        # We need a writable connection — close the cached read-only one for this op
+        with duckdb.connect(str(settings.duckdb_path)) as wcon:
+            if result_kind == "inconclusive":
+                results = [("inconclusive", title_a, 1), ("inconclusive", title_b, 2)]
+            else:
+                if winner_variant == "A":
+                    results = [("winner", title_a, 1), ("loser", title_b, 2)]
+                else:
+                    results = [("loser", title_a, 1), ("winner", title_b, 2)]
+            wts = {1: wts_a, 2: wts_b}
+            for r, title, vid_var in results:
+                wcon.execute(
+                    """
+                    INSERT INTO title_tests
+                        (video_id, variant_id, title, watch_time_share, result, confidence_pct)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (video_id, variant_id) DO UPDATE SET
+                        title = EXCLUDED.title,
+                        watch_time_share = EXCLUDED.watch_time_share,
+                        result = EXCLUDED.result,
+                        confidence_pct = EXCLUDED.confidence_pct
+                    """,
+                    [video_id, vid_var, title, wts[vid_var], r, confidence],
+                )
+        st.success(f"Salvos {len(results)} variantes para {video_id}.")
+        # Invalidate the read-only connection cache so next page render sees the new rows.
+        _con.clear()
+
+    st.subheader("Tests registrados")
+    df = con.execute(
+        "SELECT video_id, variant_id, title, result, confidence_pct, recorded_at "
+        "FROM title_tests ORDER BY recorded_at DESC LIMIT 50"
+    ).df()
+    if df.empty:
+        st.info("Nenhum test registrado ainda.")
+    else:
+        st.dataframe(df)
 
 
 # --- main ------------------------------------------------------------------
 
 tabs = st.tabs([
-    "📈 Outliers", "👤 Próprio", "🎯 Score", "✍️ Sugerir título", "🖼 Sugerir thumb",
+    "📈 Outliers", "👤 Próprio", "🎯 Score", "✍️ Sugerir título",
+    "🖼 Sugerir thumb", "🔁 A/B feedback",
 ])
 with tabs[0]:
     _tab_outliers()
@@ -214,3 +296,5 @@ with tabs[3]:
     _tab_suggest_title()
 with tabs[4]:
     _tab_suggest_thumb()
+with tabs[5]:
+    _tab_ab_test_log()
