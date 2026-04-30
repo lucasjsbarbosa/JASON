@@ -1,21 +1,30 @@
 # JASON — lista de canais vizinhos (Fase 1)
 # Formato: um @handle por linha. Comentários e linhas em branco são ignorados.
 # Resolver com: `jason ingest resolve-handles -f canais.txt -o canais_ids.txt`
+# Auditar freshness com: `uv run python scripts/audit_channels.py`
 
-# --- Médios (faixa de comparação direta para outlier analysis) ---------------
-@HoradoTerror
-@RefugioCult
-@CapraPeckinpah
-@Carbosa
-@ClassicosdoTerror
-@CineAntiqua
-@EddyKaos
-@BabyMonster
-@BKOff
-@LeratéAmanhecer
+# === ATIVOS (auditados em 2026-04-30, postaram nos últimos 6 meses) ==========
+@IconografiaDaHistoria       # análises profundas, 1.89M, 1807 vídeos
+@JuMCassini                  # bizarro/terror/crimes, 3.29M, 2463 vídeos
+@RefugioCult                 # cinema sombrio e bizarro, 1.44M, 1937 vídeos
+@CineAntiqua                 # cinema antigo / horror clássico, 153K, 255 vídeos (mais alinhado com @babygiulybaby)
 
-# --- Grandes (referência de packaging vencedor, não baseline direto) --------
-@JuMCassini
-@MarcosCamposOficial
-@JaquelineGuerreiro
-@IconografiaDaHistoria
+# === A REVISAR (a namorada precisa indicar handles corretos / substitutos) ===
+# Os handles abaixo deram problema na auditoria de 2026-04-30; deixados aqui
+# como TODO até ela passar versão revisada. Não descomentar sem checar.
+#
+# @HoradoTerror               # MORTO há 4 anos 249d (2021)
+# @CapraPeckinpah             # MORTO há 8 anos 201d (2017)
+# @ClassicosdoTerror          # MORTO há 1 ano 164d
+# @BabyMonster                # NICHO ERRADO — é o grupo de K-pop BABYMONSTER, não horror
+# @BKOff                      # VAZIO (handle resolveu mas canal sem vídeos — handle errado?)
+# @JaquelineGuerreiro         # VAZIO (363 subs, 0 vídeos — handle errado?)
+# @Carbosa                    # NÃO RESOLVE (typo? canal renomeado?)
+# @EddyKaos                   # NÃO RESOLVE
+# @LeratéAmanhecer            # NÃO RESOLVE (acentos?)
+# @MarcosCamposOficial        # NÃO RESOLVE
+
+# === META: alvo é 15-25 canais ativos do nicho ==============================
+# Per CLAUDE.md, prioridade pra faixa MÉDIA (1k-200k subs) — só CineAntiqua
+# está nessa faixa hoje. Os outros 3 são >1M (referência de packaging, não
+# baseline de comparação justa).
