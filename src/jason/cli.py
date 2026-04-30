@@ -130,6 +130,41 @@ def ingest_neighbors(
     raise typer.Exit(_not_yet("ingest neighbors", "Phase 1"))
 
 
+@ingest_app.command("tmdb-releases")
+def ingest_tmdb_releases_cmd(
+    window_past: int = typer.Option(
+        365, "--window-past", help="Days behind today to start (default 365).",
+    ),
+    window_future: int = typer.Option(
+        180, "--window-future", help="Days ahead of today to end (default 180).",
+    ),
+    region: str = typer.Option("BR", "--region", help="2-char ISO region (default BR)."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show window without calling TMDb."),
+) -> None:
+    """Pull horror releases (theatrical|digital) from TMDb into horror_releases."""
+    from datetime import UTC, datetime, timedelta
+
+    today = datetime.now(UTC).date()
+    gte = today - timedelta(days=window_past)
+    lte = today + timedelta(days=window_future)
+
+    if dry_run:
+        typer.echo(f"[dry-run] would fetch TMDb horror releases for region={region}")
+        typer.echo(f"           window: {gte} -> {lte} ({window_past + window_future} days)")
+        raise typer.Exit(0)
+
+    from jason.ingestion.tmdb import ingest_tmdb_releases
+
+    result = ingest_tmdb_releases(
+        window_past=window_past, window_future=window_future, region=region,
+    )
+    typer.secho(
+        f"tmdb releases: {result['inserted']} new, {result['updated']} updated, "
+        f"{result['skipped']} skipped (of {result['requested']} fetched)",
+        fg=typer.colors.GREEN,
+    )
+
+
 @ingest_app.command("transcripts")
 def ingest_transcripts(
     audio_dir: Path = typer.Option(
