@@ -33,14 +33,16 @@ EncodeImageFn = Callable[[list[Path]], list[list[float]]]
 # --- Default encoders (lazy import; only loaded when the user actually runs) -
 
 
-def _default_title_encoder() -> EncodeTextFn:
+def _default_title_encoder(*, show_progress: bool = False) -> EncodeTextFn:
     """Build the sentence-transformers PT-BR encoder. Downloads ~1GB on first call."""
     from sentence_transformers import SentenceTransformer  # noqa: PLC0415
 
     model = SentenceTransformer("paraphrase-multilingual-mpnet-base-v2")
 
     def encode(texts: list[str]) -> list[list[float]]:
-        vectors = model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
+        vectors = model.encode(
+            texts, normalize_embeddings=True, show_progress_bar=show_progress
+        )
         return [list(map(float, v)) for v in vectors]
 
     return encode
@@ -112,6 +114,7 @@ def embed_titles(
     force: bool = False,
     encode_fn: EncodeTextFn | None = None,
     batch_size: int = 64,
+    show_progress: bool = False,
 ) -> dict[str, int]:
     """Encode every (or one channel's) video title and persist to title_embedding.
 
@@ -119,6 +122,9 @@ def embed_titles(
         encode_fn: callable taking list[str] returning list[list[float]] of length
             TITLE_EMBED_DIM. When None, builds the default sentence-transformers
             pipeline (downloads model on first call).
+        show_progress: when True, the default encoder shows tqdm bars and the
+            persistence loop logs every 10 batches. Used by the CLI for
+            interactive runs; left False for tests / cron / Task Scheduler.
     """
     settings = get_settings()
     db = db_path or settings.duckdb_path
@@ -128,13 +134,14 @@ def embed_titles(
         if not pending:
             return {"requested": 0, "encoded": 0}
 
-        encoder = encode_fn or _default_title_encoder()
+        encoder = encode_fn or _default_title_encoder(show_progress=show_progress)
 
         ids = [r[0] for r in pending]
         _ensure_features_row(con, ids)
 
+        total_batches = (len(pending) + batch_size - 1) // batch_size
         encoded = 0
-        for i in range(0, len(pending), batch_size):
+        for batch_idx, i in enumerate(range(0, len(pending), batch_size), start=1):
             batch = pending[i : i + batch_size]
             vectors = encoder([t for _, t in batch])
             for (vid, _t), v in zip(batch, vectors, strict=True):
@@ -148,6 +155,11 @@ def embed_titles(
                     [v, vid],
                 )
                 encoded += 1
+            if show_progress and (batch_idx % 10 == 0 or batch_idx == total_batches):
+                logger.info(
+                    "title embeddings: batch %d/%d (%d/%d titles)",
+                    batch_idx, total_batches, encoded, len(pending),
+                )
 
     logger.info("title embeddings: %d encoded", encoded)
     return {"requested": len(pending), "encoded": encoded}
@@ -194,6 +206,7 @@ def embed_thumbnails(
     force: bool = False,
     encode_fn: EncodeImageFn | None = None,
     batch_size: int = 32,
+    show_progress: bool = False,
 ) -> dict[str, int]:
     """Encode every on-disk thumbnail and persist to thumb_embedding.
 
@@ -216,8 +229,9 @@ def embed_thumbnails(
         ids = [vid for vid, _ in pending]
         _ensure_features_row(con, ids)
 
+        total_batches = (len(pending) + batch_size - 1) // batch_size
         encoded = 0
-        for i in range(0, len(pending), batch_size):
+        for batch_idx, i in enumerate(range(0, len(pending), batch_size), start=1):
             batch = pending[i : i + batch_size]
             vectors = encoder([p for _, p in batch])
             for (vid, _p), v in zip(batch, vectors, strict=True):
@@ -231,6 +245,11 @@ def embed_thumbnails(
                     [v, vid],
                 )
                 encoded += 1
+            if show_progress and (batch_idx % 5 == 0 or batch_idx == total_batches):
+                logger.info(
+                    "thumb embeddings: batch %d/%d (%d/%d thumbnails)",
+                    batch_idx, total_batches, encoded, len(pending),
+                )
 
     logger.info("thumb embeddings: %d encoded", encoded)
     return {"requested": len(pending), "encoded": encoded, "skipped_no_file": 0}

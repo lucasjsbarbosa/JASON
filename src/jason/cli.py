@@ -436,9 +436,14 @@ def features_embeddings(
         typer.echo("Pick --titles, --thumbnails, or both.", err=True)
         raise typer.Exit(1)
 
+    # Surface the progress logs from the embeddings module to stderr.
+    import logging as _logging
+    _logging.basicConfig(level=_logging.INFO, format="%(message)s")
+    _logging.getLogger("jason.features.embeddings").setLevel(_logging.INFO)
+
     if titles:
         from jason.features.embeddings import embed_titles
-        r = embed_titles(channel_id=channel, force=force)
+        r = embed_titles(channel_id=channel, force=force, show_progress=True)
         typer.secho(
             f"title embeddings: {r['encoded']} encoded (of {r['requested']} pending)",
             fg=typer.colors.GREEN,
@@ -446,7 +451,7 @@ def features_embeddings(
 
     if thumbnails:
         from jason.features.embeddings import embed_thumbnails
-        r = embed_thumbnails(channel_id=channel, force=force)
+        r = embed_thumbnails(channel_id=channel, force=force, show_progress=True)
         typer.secho(
             f"thumb embeddings: {r['encoded']} encoded (of {r['requested']} pending)",
             fg=typer.colors.GREEN,
