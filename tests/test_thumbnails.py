@@ -152,3 +152,15 @@ def test_videos_without_url_are_excluded(tmp_path: Path, monkeypatch: pytest.Mon
     _seed(db, [(CHANNEL_A, "vid_nourl001", None)])
     result = download_all()
     assert result == {"requested": 0, "downloaded": 0, "skipped": 0, "failed": 0}
+
+
+@respx.mock
+def test_empty_response_counts_as_failed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """200 with empty body must NOT create a 0-byte file the embedder will choke on."""
+    db, thumbs_dir = _setup_db(monkeypatch, tmp_path)
+    _seed(db, [(CHANNEL_A, "vid_empty001", "https://example/empty.jpg")])
+    respx.get("https://example/empty.jpg").mock(return_value=Response(200, content=b""))
+
+    result = download_all()
+    assert result == {"requested": 1, "downloaded": 0, "skipped": 0, "failed": 1}
+    assert not (thumbs_dir / "vid_empty001.jpg").exists()

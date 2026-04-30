@@ -62,6 +62,14 @@ def download_thumbnail(
         logger.warning("thumbnail %s failed: %s", video_id, exc)
         return "failed", None
 
+    # YouTube's CDN occasionally responds 200 with an empty body for missing
+    # maxres assets. Persisting that creates a 0-byte ghost file that the
+    # next run skips and that the embedder can't decode — count as failed
+    # and leave nothing behind.
+    if not response.content:
+        logger.warning("thumbnail %s: empty response body", video_id)
+        return "failed", None
+
     target.write_bytes(response.content)
     return "downloaded", target
 

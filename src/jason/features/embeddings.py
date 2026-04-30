@@ -212,6 +212,10 @@ def embed_thumbnails(
 
     Skips videos without `data/thumbnails/{video_id}.jpg`. Run
     `jason ingest thumbnails` first to populate.
+
+    A bad image (corrupt JPEG, 0-byte file) is logged and skipped — the
+    surrounding batch is retried one-by-one so a single bad file doesn't
+    discard the rest of the work.
     """
     settings = get_settings()
     db = db_path or settings.duckdb_path
@@ -222,7 +226,7 @@ def embed_thumbnails(
             con, thumbs_dir=tdir, channel_id=channel_id, force=force,
         )
         if not pending:
-            return {"requested": 0, "encoded": 0, "skipped_no_file": 0}
+            return {"requested": 0, "encoded": 0, "skipped_invalid": 0}
 
         encoder = encode_fn or _default_thumb_encoder()
 
@@ -231,10 +235,27 @@ def embed_thumbnails(
 
         total_batches = (len(pending) + batch_size - 1) // batch_size
         encoded = 0
+        skipped_invalid = 0
         for batch_idx, i in enumerate(range(0, len(pending), batch_size), start=1):
             batch = pending[i : i + batch_size]
-            vectors = encoder([p for _, p in batch])
+            try:
+                vectors = encoder([p for _, p in batch])
+            except Exception as exc:  # noqa: BLE001 — bad image kinds are open-ended
+                logger.warning(
+                    "thumb embeddings: batch %d failed (%s); retrying one-by-one",
+                    batch_idx, exc,
+                )
+                vectors = []
+                for _vid, p in batch:
+                    try:
+                        vectors.extend(encoder([p]))
+                    except Exception as item_exc:  # noqa: BLE001
+                        logger.warning("thumb embeddings: skipping %s (%s)", p, item_exc)
+                        vectors.append(None)
+                        skipped_invalid += 1
             for (vid, _p), v in zip(batch, vectors, strict=True):
+                if v is None:
+                    continue
                 if len(v) != THUMB_EMBED_DIM:
                     raise ValueError(
                         f"thumb encoder returned {len(v)}-dim vector, expected {THUMB_EMBED_DIM}"
@@ -247,9 +268,13 @@ def embed_thumbnails(
                 encoded += 1
             if show_progress and (batch_idx % 5 == 0 or batch_idx == total_batches):
                 logger.info(
-                    "thumb embeddings: batch %d/%d (%d/%d thumbnails)",
-                    batch_idx, total_batches, encoded, len(pending),
+                    "thumb embeddings: batch %d/%d (%d encoded, %d skipped invalid)",
+                    batch_idx, total_batches, encoded, skipped_invalid,
                 )
 
-    logger.info("thumb embeddings: %d encoded", encoded)
-    return {"requested": len(pending), "encoded": encoded, "skipped_no_file": 0}
+    logger.info("thumb embeddings: %d encoded, %d skipped invalid", encoded, skipped_invalid)
+    return {
+        "requested": len(pending),
+        "encoded": encoded,
+        "skipped_invalid": skipped_invalid,
+    }

@@ -202,3 +202,41 @@ def test_embed_thumbnails_rejects_wrong_dim(tmp_path: Path, monkeypatch: pytest.
 
     with pytest.raises(ValueError, match="thumb encoder returned 256-dim"):
         embed_thumbnails(encode_fn=bad_encoder)
+
+
+def test_embed_thumbnails_skips_invalid_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A single bad file in a batch must not kill the run — it gets skipped, the
+    rest goes through, and the count comes back in skipped_invalid."""
+    db, thumbs_dir = _setup(monkeypatch, tmp_path)
+    _seed(
+        db,
+        [
+            (CHANNEL_A, "vid_thbad0001", "bad"),
+            (CHANNEL_A, "vid_thgood001", "good"),
+            (CHANNEL_A, "vid_thgood002", "good2"),
+        ],
+    )
+    (thumbs_dir / "vid_thbad0001.jpg").write_bytes(b"")  # 0-byte
+    (thumbs_dir / "vid_thgood001.jpg").write_bytes(b"x" * 1000)
+    (thumbs_dir / "vid_thgood002.jpg").write_bytes(b"y" * 2000)
+
+    def encoder(paths: list[Path]) -> list[list[float]]:
+        # Mimic PIL behavior: choke on 0-byte files.
+        for p in paths:
+            if p.stat().st_size == 0:
+                raise OSError(f"cannot identify image file {p}")
+        return [[float(p.stat().st_size) / 1000.0] * THUMB_EMBED_DIM for p in paths]
+
+    r = embed_thumbnails(encode_fn=encoder, batch_size=3)
+    assert r["encoded"] == 2
+    assert r["skipped_invalid"] == 1
+
+    with duckdb.connect(str(db)) as con:
+        ids = sorted(
+            r[0] for r in con.execute(
+                "SELECT video_id FROM video_features WHERE thumb_embedding IS NOT NULL"
+            ).fetchall()
+        )
+    assert ids == ["vid_thgood001", "vid_thgood002"]
