@@ -42,6 +42,8 @@ src/jason/models/artifacts/bertopic_*
 
 # --- Claude Code (session state, settings.local.json, etc.) ------------------
 .claude/
+.agents/
+skills-lock.json
 
 # --- IDE / OS ----------------------------------------------------------------
 .vscode/

@@ -237,20 +237,25 @@ def persist_suggestions(
     transcript_hash: str,
     outlier_ids: list[str],
     db_path: Path | None = None,
-) -> int:
-    """Write a `suggestions` row per candidate. Returns the count inserted."""
+) -> list[int]:
+    """Write a `suggestions` row per candidate. Returns the inserted IDs in
+    the same order as `candidates` so callers can surface them to the UI for
+    later "publiquei essa" feedback (chosen_at)."""
     settings = get_settings()
     db = db_path or settings.duckdb_path
 
+    inserted_ids: list[int] = []
     with duckdb.connect(str(db)) as con:
         for rank, (title, mult) in enumerate(candidates, start=1):
-            con.execute(
+            row = con.execute(
                 """
                 INSERT INTO suggestions
                     (id, channel_id, candidate_title, rank_position,
                      predicted_multiplier, transcript_hash, rag_outlier_ids)
                 VALUES (nextval('suggestions_id_seq'), ?, ?, ?, ?, ?, ?)
+                RETURNING id
                 """,
                 [channel_id, title, rank, mult, transcript_hash, outlier_ids],
-            )
-    return len(candidates)
+            ).fetchone()
+            inserted_ids.append(int(row[0]))
+    return inserted_ids

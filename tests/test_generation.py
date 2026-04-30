@@ -235,14 +235,15 @@ def test_generate_titles_calls_anthropic_with_cache(tmp_path: Path, monkeypatch:
 
 def test_persist_suggestions_writes_rows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db = _setup(monkeypatch, tmp_path)
-    n = persist_suggestions(
+    ids = persist_suggestions(
         channel_id=CHANNEL_A,
         candidates=[("Title 1", 3.5), ("Title 2", 2.0), ("Title 3", None)],
         transcript_hash="abc123",
         outlier_ids=["vid_a", "vid_b"],
         db_path=db,
     )
-    assert n == 3
+    assert len(ids) == 3
+    assert all(isinstance(i, int) for i in ids)
     with duckdb.connect(str(db)) as con:
         rows = con.execute(
             "SELECT candidate_title, rank_position, predicted_multiplier "

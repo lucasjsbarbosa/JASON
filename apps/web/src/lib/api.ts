@@ -84,9 +84,16 @@ export type ThemeCoverage = {
 
 export type SuggestCandidate = {
   title: string;
+  suggestion_id: number | null;
   multiplier: number | null;
   multiplier_human: string | null;
   contributions: ScoreContribution[];
+};
+
+export type ChoseResponse = {
+  suggestion_id: number;
+  chosen_rank: number;
+  chosen_at: string;
 };
 
 export type SuggestResponse = {

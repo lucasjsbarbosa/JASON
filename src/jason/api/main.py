@@ -7,6 +7,7 @@ request. CORS aberto pra `localhost:3000` (Next.js dev).
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,8 @@ from jason.dashboard.humanize import (
     humanize_percentile,
     humanize_topic_label,
 )
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="JASON API",
@@ -139,6 +142,7 @@ class SuggestRequest(BaseModel):
 
 class SuggestCandidate(BaseModel):
     title: str
+    suggestion_id: int | None = None  # row id em `suggestions` pra feedback chose
     multiplier: float | None = None
     multiplier_human: str | None = None
     contributions: list[ScoreContribution] = Field(default_factory=list)
@@ -148,6 +152,12 @@ class SuggestResponse(BaseModel):
     candidates: list[SuggestCandidate]
     rag_outlier_count: int
     model_trained: bool
+
+
+class ChoseResponse(BaseModel):
+    suggestion_id: int
+    chosen_rank: int
+    chosen_at: datetime
 
 
 # --- endpoints -----------------------------------------------------------
@@ -409,7 +419,7 @@ def suggest(req: SuggestRequest) -> SuggestResponse:
     """Gera N candidatos via Claude (RAG sobre outliers do nicho), ranqueia
     pelo modelo se treinado, devolve com explicação humanizada."""
     from jason.dashboard.humanize import humanize_contribution
-    from jason.generation.titles import generate_titles
+    from jason.generation.titles import generate_titles, persist_suggestions
     from jason.models.predict import score_title_with_explanation
 
     settings = get_settings()
@@ -470,10 +480,57 @@ def suggest(req: SuggestRequest) -> SuggestResponse:
     if model_trained:
         candidates.sort(key=lambda c: -(c.multiplier or 0))
 
+    # Persist sorted candidates so the UI can post `chose` feedback later.
+    # rank_position == final order shown to the user (post-sort).
+    try:
+        ids = persist_suggestions(
+            channel_id=channel_id,
+            candidates=[(c.title, c.multiplier) for c in candidates],
+            transcript_hash=str(gen.get("transcript_hash") or ""),
+            outlier_ids=list(gen.get("outlier_ids", []) or []),
+        )
+        for c, sid in zip(candidates, ids, strict=True):
+            c.suggestion_id = sid
+    except Exception as exc:  # noqa: BLE001
+        # Persistence failure shouldn't break the response — the user can
+        # still see the candidates, just can't mark "chose" later.
+        logger.warning("persist_suggestions failed: %s", exc)
+
     return SuggestResponse(
         candidates=candidates,
         rag_outlier_count=len(gen.get("outlier_ids", []) or []),
         model_trained=model_trained,
+    )
+
+
+@app.post("/api/suggestions/{suggestion_id}/chose", response_model=ChoseResponse)
+def chose_suggestion(suggestion_id: int) -> ChoseResponse:
+    """Marca essa sugestão como a que a usuária publicou. Sinal de "modelo
+    concorda/discorda do humano" — coletado sem A/B test."""
+    with _write_db() as wcon:
+        # Idempotency: limpa chosen_at de outras rows com mesmo transcript_hash
+        # (uma escolha por geração).
+        row = wcon.execute(
+            "SELECT transcript_hash, rank_position FROM suggestions WHERE id = ?",
+            [suggestion_id],
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="suggestion not found")
+        thash, rank = row[0], int(row[1])
+        if thash:
+            wcon.execute(
+                "UPDATE suggestions SET chosen_at = NULL "
+                "WHERE transcript_hash = ? AND id != ?",
+                [thash, suggestion_id],
+            )
+        result = wcon.execute(
+            "UPDATE suggestions SET chosen_at = now() WHERE id = ? RETURNING chosen_at",
+            [suggestion_id],
+        ).fetchone()
+    return ChoseResponse(
+        suggestion_id=suggestion_id,
+        chosen_rank=rank,
+        chosen_at=result[0],
     )
 
 

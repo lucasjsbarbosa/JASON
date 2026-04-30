@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { api, type SuggestResponse } from "@/lib/api";
+import { api, type ChoseResponse, type SuggestResponse } from "@/lib/api";
 
 export default function SugerirPage() {
   const [transcript, setTranscript] = useState("");
@@ -12,6 +12,23 @@ export default function SugerirPage() {
   const [result, setResult] = useState<SuggestResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openIdx, setOpenIdx] = useState<number | null>(null);
+  const [chosenId, setChosenId] = useState<number | null>(null);
+  const [choosing, setChoosing] = useState<number | null>(null);
+
+  async function chose(suggestionId: number) {
+    setChoosing(suggestionId);
+    try {
+      const r = await api<ChoseResponse>(
+        `/api/suggestions/${suggestionId}/chose`,
+        { method: "POST" },
+      );
+      setChosenId(r.suggestion_id);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setChoosing(null);
+    }
+  }
 
   async function submit() {
     if (!transcript.trim()) {
@@ -163,11 +180,12 @@ export default function SugerirPage() {
                   : c.multiplier && c.multiplier >= 1.5
                   ? "pill-mid"
                   : "";
+              const isChosen = chosenId !== null && c.suggestion_id === chosenId;
               return (
                 <article
                   key={i}
-                  className="card cursor-pointer"
-                  onClick={() => setOpenIdx(open ? null : i)}
+                  className="card"
+                  style={isChosen ? { borderColor: "var(--accent)" } : undefined}
                 >
                   <div className="flex items-center gap-4">
                     <div className="font-mono text-sm text-[var(--muted)] w-8 shrink-0">
@@ -177,9 +195,32 @@ export default function SugerirPage() {
                       {c.multiplier_human ?? "sem score"}
                     </span>
                     <div className="flex-1 text-sm">{c.title}</div>
+                    {c.suggestion_id !== null && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          chose(c.suggestion_id!);
+                        }}
+                        disabled={choosing === c.suggestion_id}
+                        className="text-xs uppercase tracking-wider px-2 py-1 border transition-colors"
+                        style={{
+                          fontFamily: "var(--font-display)",
+                          borderColor: isChosen ? "var(--accent)" : "var(--border)",
+                          color: isChosen ? "var(--accent)" : "var(--muted)",
+                          background: "transparent",
+                        }}
+                      >
+                        {choosing === c.suggestion_id
+                          ? "..."
+                          : isChosen
+                          ? "✓ publicada"
+                          : "publiquei"}
+                      </button>
+                    )}
                     <div
-                      className="text-[var(--muted)] font-mono text-xs"
-                      style={{ minWidth: "5rem", textAlign: "right" }}
+                      className="text-[var(--muted)] font-mono text-xs cursor-pointer"
+                      style={{ minWidth: "4rem", textAlign: "right" }}
+                      onClick={() => setOpenIdx(open ? null : i)}
                     >
                       {open ? "fechar ◢" : "por quê? ▾"}
                     </div>
