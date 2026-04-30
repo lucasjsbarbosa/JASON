@@ -13,7 +13,7 @@ async function getData() {
 }
 
 function fmtDate(iso: string | null): string {
-  if (!iso) return "—";
+  if (!iso) return "·";
   return new Date(iso).toLocaleDateString("pt-BR");
 }
 
@@ -55,20 +55,20 @@ export default async function Home() {
       <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <MetricCard
           label="Vídeos longos"
-          value={metrics ? metrics.long_videos.toLocaleString("pt-BR") : "—"}
+          value={metrics ? metrics.long_videos.toLocaleString("pt-BR") : "·"}
         />
         <MetricCard
           label="Último upload"
-          value={metrics ? fmtDate(metrics.last_upload) : "—"}
+          value={metrics ? fmtDate(metrics.last_upload) : "·"}
         />
         <MetricCard
           label="Maior outlier"
-          value={metrics?.top_multiplier ? `${metrics.top_multiplier.toFixed(1)}x` : "—"}
+          value={metrics?.top_multiplier ? `${metrics.top_multiplier.toFixed(1)}x` : "·"}
           hint={metrics?.top_multiplier_human ?? undefined}
         />
         <MetricCard
           label="Vídeos acima da média"
-          value={metrics ? metrics.soft_outliers.toLocaleString("pt-BR") : "—"}
+          value={metrics ? metrics.soft_outliers.toLocaleString("pt-BR") : "·"}
           hint="≥ 1.5x da mediana do canal"
         />
       </section>
@@ -77,7 +77,7 @@ export default async function Home() {
         <h2 className="text-lg mb-4">Vídeos que mais bombaram (relativos ao próprio canal)</h2>
         <p className="text-sm text-[var(--muted)] mb-4 max-w-3xl">
           Ordenado por <span className="font-mono">views ÷ mediana do canal</span> naquele
-          período. Por isso um vídeo de 2k pode ficar acima de um de 20k — se os vizinhos
+          período. Por isso um vídeo de 2k pode ficar acima de um de 20k: se os vizinhos
           da época tinham mais views, o de 20k foi só normal pro canal.
         </p>
         <div className="space-y-3">

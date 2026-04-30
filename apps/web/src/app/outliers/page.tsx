@@ -57,8 +57,8 @@ export default function OutliersPage() {
         <p className="text-sm text-[var(--muted)] mt-2 max-w-3xl">
           Vídeos que mais bombaram em cada canal acompanhado, ordenados pelo
           quanto superaram a média do próprio canal. Use como inspiração de
-          packaging vencedor — mas lembrando: comparar canal de 3k com canal
-          de 3M tem armadilha (use o filtro por canal pra comparações justas).
+          packaging vencedor (lembrando: comparar canal de 3k com canal
+          de 3M tem armadilha; use o filtro por canal pra comparações justas).
         </p>
       </section>
 
@@ -79,7 +79,7 @@ export default function OutliersPage() {
                   {g.list.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.title}
-                      {c.subs ? ` — ${formatSubs(c.subs)} subs` : ""}
+                      {c.subs ? ` · ${formatSubs(c.subs)} subs` : ""}
                     </option>
                   ))}
                 </optgroup>

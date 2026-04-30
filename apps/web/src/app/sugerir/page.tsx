@@ -140,7 +140,7 @@ export default function SugerirPage() {
           </button>
           {loading && (
             <span className="text-xs text-[var(--muted)] font-mono">
-              Chamando Claude · busca RAG · ranqueando…
+              Buscando vídeos vencedores do nicho · gerando candidatos · ranqueando
             </span>
           )}
         </div>
@@ -157,7 +157,7 @@ export default function SugerirPage() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg">Candidatos</h2>
             <div className="text-xs text-[var(--muted)] font-mono">
-              RAG buscou {result.rag_outlier_count} outliers do nicho
+              JASON consultou {result.rag_outlier_count} vídeos vencedores do nicho como referência
               {!result.model_trained &&
                 " · modelo não treinado (sem score)"}
             </div>

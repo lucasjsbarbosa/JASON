@@ -70,7 +70,7 @@ export default function ThumbsPage() {
         <p className="text-xs text-[var(--muted)] mt-3 max-w-3xl">
           <strong>Limitação atual:</strong> não detecta efeitos específicos
           (olhos brancos, boca costurada, cutout com glow vermelho) nem texto
-          dentro das thumbs do nicho — somente os títulos. OCR/cutout estão
+          dentro das thumbs do nicho, somente os títulos. OCR/cutout estão
           no roadmap.
         </p>
       </section>
@@ -106,7 +106,7 @@ export default function ThumbsPage() {
               <option value="">Sem filtro (geral do nicho)</option>
               {themes.map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.label} — {t.n_outliers} outliers
+                  {t.label} · {t.n_outliers} outliers
                 </option>
               ))}
             </select>
@@ -169,11 +169,11 @@ export default function ThumbsPage() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-[var(--muted)]">rosto:</span>
-                      <span>{f.face_score?.toFixed(3) ?? "—"}</span>
+                      <span>{f.face_score?.toFixed(3) ?? "·"}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-[var(--muted)]">similar. outliers:</span>
-                      <span>{f.outlier_similarity?.toFixed(3) ?? "—"}</span>
+                      <span>{f.outlier_similarity?.toFixed(3) ?? "·"}</span>
                     </div>
                   </div>
                   <a

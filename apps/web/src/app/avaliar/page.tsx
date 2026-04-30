@@ -144,33 +144,30 @@ export default function AvaliarPage() {
             <div className="text-sm text-[var(--text)] mt-3">
               {result.multiplier_human}
             </div>
-            <div className="text-xs text-[var(--muted)] mt-4 font-mono">
-              log_multiplier = {result.log_multiplier.toFixed(4)}
-            </div>
           </div>
 
           <div className="card md:col-span-2">
             <h2 className="text-base mb-1">Por que esse score?</h2>
             <p className="text-xs text-[var(--muted)] mb-1">
-              Duas referências independentes — leia separado:
+              Duas referências independentes, leia separado:
             </p>
             <ul className="text-xs text-[var(--muted)] mb-3 list-disc list-inside space-y-0.5">
               <li>
                 <span style={{ color: "#5BC076" }}>▲ ajudou</span> /{" "}
-                <span style={{ color: "var(--accent)" }}>▼ atrapalhou</span> —
+                <span style={{ color: "var(--accent)" }}>▼ atrapalhou</span>:
                 modelo previu pro <strong>seu canal</strong> (3.5k subs)
               </li>
               <li>
                 <span className="font-mono">Nicho geral:</span> estatística
-                dos top-10% nos 25 canais ingeridos
+                dos top-10% nos 41 canais ingeridos
               </li>
             </ul>
             <div className="text-xs mb-3 p-2 border border-[var(--border)]" style={{ background: "var(--surface-2)", color: "#A8A39A" }}>
               <strong style={{ color: "#D4AF37" }}>⚠ calibração:</strong>{" "}
-              modelo tá em modo bootstrap (multiplier sem cohort 28d ainda)
-              + tier_1 (sua faixa) tem só ~87 outliers de sample. Features
-              com contribuição menor que ±0.05 são filtradas — são ruído,
-              não signal. Vai ficar mais nítido conforme acumular snapshots.
+              modelo está em modo bootstrap (multiplier sem cohort 28d ainda),
+              tier_1 (sua faixa) tem ~151 outliers de sample. Features
+              com contribuição menor que ±0.05 são filtradas (ruído,
+              não signal). Vai ficar mais nítido conforme acumular snapshots.
               {result.n_neutral_features > 0 && (
                 <>
                   {" "}

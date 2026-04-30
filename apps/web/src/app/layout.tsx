@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "JASON",
-  description: "youtube outlier intelligence — @babygiulybaby",
+  description: "youtube outlier intelligence · @babygiulybaby",
 };
 
 const NAV = [
@@ -53,7 +53,7 @@ export default function RootLayout({
         </header>
         <main className="flex-1 px-8 py-8 max-w-screen-2xl w-full mx-auto">{children}</main>
         <footer className="border-t border-[var(--border)] px-8 py-4 text-xs text-[var(--muted)] font-mono">
-          local instance · backend FastAPI :8000 · frontend Next.js :3000
+          jason · local
         </footer>
       </body>
     </html>
