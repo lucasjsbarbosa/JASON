@@ -417,10 +417,12 @@ def _tab_own_performance() -> None:
     st.markdown("---")
 
     # Packaging gap vs niche outliers
-    st.subheader("Gap de packaging vs outliers do nicho")
+    st.subheader("Como seus títulos comparam com os que mais bombam no nicho")
     st.caption(
-        "Quanto seu padrão de título usa cada flag, vs quanto os outliers (p≥90) "
-        "do nicho usam. Diff negativo = você usa MENOS que o que viraliza."
+        "Pra cada padrão de título (CAPS, número, palavra tipo EXPLICADO, etc) "
+        "mostro a frequência com que **você** usa, e a frequência com que os "
+        "**vídeos top 10% do nicho** usam. Quando o diff é negativo, você está "
+        "usando MENOS o padrão que costuma viralizar nesse mercado."
     )
     gap = con.execute(
         """
@@ -507,10 +509,14 @@ def _tab_own_performance() -> None:
     st.markdown("---")
 
     # Themes covered + their multiplier vs niche
-    st.subheader("Temas cobertos vs nicho")
+    st.subheader("Subgêneros que você cobriu — comparado ao nicho")
     st.caption(
-        "Quais temas (BERTopic Camada A) seus vídeos tocaram, "
-        "teu multiplier médio nesse tema e o do nicho."
+        "Cada linha é um subgênero (terror clássico, possessão, found footage, "
+        "true crime, etc) detectado automaticamente nos títulos. Mostro: "
+        "**quantos vídeos seus** caíram naquele subgênero, **quanto eles bombaram "
+        "em média** vs **quanto o nicho** bombou no mesmo subgênero. "
+        "Use pra ver onde você está alinhada com o que funciona e onde está "
+        "perdendo audiência."
     )
     themes = con.execute(
         """
@@ -545,8 +551,21 @@ def _tab_own_performance() -> None:
         [own, own],
     ).df()
     if themes.empty:
-        st.info("Sem temas detectados nos teus vídeos. Rode `jason features topics`.")
+        st.info("Sem subgêneros detectados nos teus vídeos. Rode `jason features topics`.")
     else:
+        themes = themes.copy()
+        themes["theme_label"] = themes["theme_label"].apply(
+            lambda v: humanize_topic_label(v) or v,
+        )
+        themes = themes.rename(columns={
+            "theme_label":  "subgênero",
+            "own_n":        "seus vídeos",
+            "own_avg":      "seu mult. médio",
+            "own_top":      "seu mult. máx",
+            "niche_n":      "vídeos no nicho",
+            "niche_avg":    "mult. médio do nicho",
+            "niche_top":    "mult. máx do nicho",
+        })
         st.dataframe(themes, hide_index=True, use_container_width=True)
 
     st.markdown("---")
