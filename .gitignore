@@ -30,6 +30,9 @@ htmlcov/
 data/
 !data/.gitkeep
 
+# --- Resolved IDs (regenerable from canais.txt; may include ad-hoc additions)
+canais_ids.txt
+
 # --- Models ------------------------------------------------------------------
 src/jason/models/artifacts/*.lgb
 src/jason/models/artifacts/bertopic_*

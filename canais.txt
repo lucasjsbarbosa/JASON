@@ -1,0 +1,21 @@
+# JASON — lista de canais vizinhos (Fase 1)
+# Formato: um @handle por linha. Comentários e linhas em branco são ignorados.
+# Resolver com: `jason ingest resolve-handles -f canais.txt -o canais_ids.txt`
+
+# --- Médios (faixa de comparação direta para outlier analysis) ---------------
+@HoradoTerror
+@RefugioCult
+@CapraPeckinpah
+@Carbosa
+@ClassicosdoTerror
+@CineAntiqua
+@EddyKaos
+@BabyMonster
+@BKOff
+@LeratéAmanhecer
+
+# --- Grandes (referência de packaging vencedor, não baseline direto) --------
+@JuMCassini
+@MarcosCamposOficial
+@JaquelineGuerreiro
+@IconografiaDaHistoria
