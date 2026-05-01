@@ -318,7 +318,37 @@ O modelo treinado em multiplier pode aprender padrões clickbait. Mitigação: o
 
 ---
 
-## 8. Primeira tarefa
+## 8. Continuidade entre sessões e máquinas
+
+O projeto é usado em mais de uma máquina (desktop + notebook). Pra os
+agentes manterem contexto entre sessões, **leia `WORKLOG.md` no início**
+de cada sessão e **acrescente uma entrada no fim**.
+
+Regras operacionais:
+
+1. **No início de toda sessão**, antes de qualquer coisa que envolva
+   estado do projeto:
+   - `git pull` (puxa código novo) e `git lfs pull` (puxa warehouse +
+     modelo se houver atualização).
+   - Lê `WORKLOG.md` inteiro pra saber onde a última sessão parou.
+   - `git log --oneline -20` pra ver commits desde a última entrada.
+2. **No fim da sessão** (ou antes do usuário trocar de máquina):
+   - Acrescenta UMA entrada no topo do `WORKLOG.md` com data, máquina,
+     resumo (3-5 linhas), pendências, atenção (se houver).
+   - Mantém só as 6 entradas mais recentes — apaga as antigas pra
+     arquivo não inflar.
+   - `git add WORKLOG.md && git commit -m "worklog: <data> <máquina>" &&
+     git push`. Sem isso, a outra máquina não sabe.
+3. **Nunca peça ao usuário "o que foi feito?"** quando ele trocar de
+   máquina — descobre sozinho via `WORKLOG.md` + `git log`.
+
+Convenção de commits: prefixos `feat:`, `fix:`, `ux:`, `docs:`,
+`worklog:`, `data:` (LFS-tracked). Mantém o histórico legível pra outras
+sessões.
+
+---
+
+## 9. Primeira tarefa
 
 Começar pela **Fase 0**. Antes de escrever qualquer código:
 
@@ -329,7 +359,7 @@ Começar pela **Fase 0**. Antes de escrever qualquer código:
 
 ---
 
-## 9. Changelog do spec
+## 10. Changelog do spec
 
 Mudanças aplicadas após primeira revisão técnica (registrar aqui qualquer mudança estrutural pra contextualizar escolhas):
 
