@@ -64,6 +64,7 @@ def _setup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
         "004_video_features.sql", "005_embeddings.sql", "006_topics.sql",
         "010_paper_backed_features.sql",
         "011_paper_backed_features_v2.sql",
+        "012_title_theme_alignment.sql",
     ):
         with duckdb.connect(str(db)) as con:
             con.execute(Path(f"migrations/{sql_file}").read_text(encoding="utf-8"))

@@ -29,16 +29,19 @@ htmlcov/
 # --- JASON data --------------------------------------------------------------
 data/
 !data/.gitkeep
+# warehouse.duckdb shippa via Git LFS (estado do projeto). Thumbnails NÃO
+# (regeram via `jason ingest thumbnails`, free, vem do CDN do YouTube).
+!data/warehouse.duckdb
 
 # --- Resolved IDs (regenerable from canais.txt; may include ad-hoc additions)
 canais_ids.txt
 
-# --- Models ------------------------------------------------------------------
-src/jason/models/artifacts/**/*.lgb
-src/jason/models/artifacts/**/*.pkl
-src/jason/models/artifacts/**/meta.json
-src/jason/models/artifacts/**/best_params.json
-src/jason/models/artifacts/bertopic_*
+# --- Models — também shippam via Git LFS (modelo treinado é estado) ----------
+!src/jason/models/artifacts/**/*.lgb
+!src/jason/models/artifacts/**/*.pkl
+!src/jason/models/artifacts/**/meta.json
+!src/jason/models/artifacts/**/best_params.json
+!src/jason/models/artifacts/bertopic_*
 
 # --- Claude Code (session state, settings.local.json, etc.) ------------------
 .claude/

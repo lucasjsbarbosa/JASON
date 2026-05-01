@@ -662,6 +662,77 @@ def features_sentiment(
     )
 
 
+@features_app.command("theme-alignment")
+def features_theme_alignment(
+    channel: str | None = typer.Option(None, "--channel", "-c"),
+    force: bool = typer.Option(False, "--force"),
+    min_outliers: int = typer.Option(
+        5, "--min-outliers",
+        help="Min outliers per theme to form a centroid.",
+    ),
+) -> None:
+    """Cosine do title_embedding vs centroide dos outliers do mesmo theme_id.
+
+    Mede quão prototípico do subgênero vencedor o título está. Sinal
+    ortogonal ao caps_ratio / has_explained: captura semântica vs estrutura.
+    """
+    import logging as _logging
+    _logging.basicConfig(level=_logging.INFO, format="%(message)s")
+
+    from jason.features.theme_alignment import compute_theme_alignment
+
+    result = compute_theme_alignment(
+        channel_id=channel, force=force,
+        min_outliers_per_theme=min_outliers, show_progress=True,
+    )
+    typer.secho(
+        f"theme alignment: {result['computed']} computed "
+        f"(of {result['requested']} pending, {result.get('centroids', 0)} centroids)",
+        fg=typer.colors.GREEN,
+    )
+
+
+@features_app.command("thumb-vlm")
+def features_thumb_vlm(
+    channel: str | None = typer.Option(None, "--channel", "-c"),
+    force: bool = typer.Option(False, "--force"),
+    batch_size: int = typer.Option(4, "--batch-size"),
+    max_videos: int | None = typer.Option(None, "--max-videos"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+) -> None:
+    """Anota thumbnails com Claude vision (schema 6-attribute hard-edge).
+
+    Custa em torno de $0.0007/imagem. Para 21k thumbs, ~$15. --max-videos
+    pra limitar volume na primeira passada.
+    """
+    import logging as _logging
+    _logging.basicConfig(level=_logging.INFO, format="%(message)s")
+
+    if dry_run:
+        import duckdb as _ddb  # noqa: PLC0415
+
+        from jason.config import get_settings  # noqa: PLC0415
+        from jason.features.thumb_vlm import _read_pending  # noqa: PLC0415
+        with _ddb.connect(str(get_settings().duckdb_path), read_only=True) as con:
+            pending = _read_pending(con, force=force, channel_id=channel)
+        n = len(pending) if max_videos is None else min(max_videos, len(pending))
+        cost = n * 0.0007
+        typer.echo(f"[dry-run] would annotate {n} thumbnails (~${cost:.2f})")
+        return
+
+    from jason.features.thumb_vlm import annotate_thumbnails
+
+    result = annotate_thumbnails(
+        channel_id=channel, force=force, batch_size=batch_size,
+        max_videos=max_videos,
+    )
+    typer.secho(
+        f"vlm: {result['annotated']} annotated, {result['failed']} failed "
+        f"(of {result['requested']})",
+        fg=typer.colors.GREEN,
+    )
+
+
 @features_app.command("topics")
 def features_topics(
     themes: bool = typer.Option(False, "--themes", help="Fit BERTopic on masked titles."),

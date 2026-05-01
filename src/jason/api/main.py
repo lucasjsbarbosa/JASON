@@ -111,6 +111,9 @@ class ScoreRequest(BaseModel):
     title: str
     channel_id: str | None = None
     duration_min: float = Field(default=40.0, ge=1.0, le=180.0)
+    # ISO 8601. None = não foi escolhido pelo usuário; o handler usa now()
+    # mas suprime as contribuições de horário pra não fingir que ela disse algo.
+    published_at: str | None = None
 
 
 class ScoreContribution(BaseModel):
@@ -138,6 +141,7 @@ class SuggestRequest(BaseModel):
     theme: str | None = None
     num_candidates: int = Field(default=10, ge=3, le=20)
     duration_min: float = Field(default=40.0, ge=1.0, le=180.0)
+    published_at: str | None = None  # ISO. None = não escolhido (suprime no explain).
 
 
 class SuggestCandidate(BaseModel):
@@ -145,7 +149,12 @@ class SuggestCandidate(BaseModel):
     suggestion_id: int | None = None  # row id em `suggestions` pra feedback chose
     multiplier: float | None = None
     multiplier_human: str | None = None
+    # baseline_multiplier = exp(base_value) - "ponto de partida" do canal+formato
+    # antes de aplicar qualquer ajuste do título. Sem isso, contribuições só
+    # mostram delta sem dizer onde a barra estava.
+    baseline_multiplier: float | None = None
     contributions: list[ScoreContribution] = Field(default_factory=list)
+    n_neutral_features: int = 0
 
 
 class SuggestResponse(BaseModel):
@@ -276,6 +285,8 @@ def own_top_videos(limit: int = 10) -> list[OutlierVideo]:
 
 @app.post("/api/score", response_model=ScoreResponse)
 def score(req: ScoreRequest) -> ScoreResponse:
+    from datetime import UTC, datetime  # noqa: PLC0415
+
     from jason.dashboard.humanize import humanize_contribution
     from jason.models.predict import score_title_with_explanation
 
@@ -283,9 +294,40 @@ def score(req: ScoreRequest) -> ScoreResponse:
     channel_id = req.channel_id or settings.own_channel_id
     duration_s = int(req.duration_min * 60)
 
+    # Look up the channel's subs and compute the bucket so the per-feature
+    # context is restricted to outliers in HER tier (not the global pool,
+    # which is dominated by tier_4 channels and gives misleading numbers).
+    from jason.models.buckets import bucket_of  # noqa: PLC0415
+    candidate_bucket: int | None = None
+    with _read_db() as con:
+        row = con.execute(
+            "SELECT subs FROM channels WHERE id = ?", [channel_id],
+        ).fetchone()
+    if row and row[0] is not None:
+        candidate_bucket = bucket_of(row[0])
+
+    # User-supplied datetime → use as-is. None → fall back to now() but mark
+    # time-derived features as "implicit" so the UI suppresses them from the
+    # explanation (não fingir que ela escolheu um horário que não escolheu).
+    published_at: datetime | None = None
+    user_supplied_time = bool(req.published_at)
+    if req.published_at:
+        try:
+            # Accept ISO with or without trailing Z.
+            iso = req.published_at.replace("Z", "+00:00")
+            published_at = datetime.fromisoformat(iso)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"published_at inválido: {exc}",
+            ) from exc
+
     try:
         r = score_title_with_explanation(
-            req.title, channel_id, duration_s=duration_s, top_k=8,
+            req.title, channel_id,
+            duration_s=duration_s,
+            published_at=published_at,
+            top_k=8, min_magnitude=0.02,
         )
     except FileNotFoundError as exc:
         raise HTTPException(
@@ -295,8 +337,18 @@ def score(req: ScoreRequest) -> ScoreResponse:
 
     from jason.dashboard.feature_context import context_for
 
+    # Features whose value derives from `published_at`. When the user didn't
+    # supply a time, drop them from the explanation — sinal é noise, não escolha.
+    IMPLICIT_TIME_FEATURES = {
+        "published_hour", "published_dow",
+        "is_halloween_week", "is_friday_13_week",
+        "days_to_nearest_horror_release",
+    }
+
     contributions = []
     for c in r["contributions"]:
+        if not user_supplied_time and c["feature"] in IMPLICIT_TIME_FEATURES:
+            continue
         h = humanize_contribution(c)
         contributions.append(ScoreContribution(
             feature=c["feature"],
@@ -306,7 +358,9 @@ def score(req: ScoreRequest) -> ScoreResponse:
             direction=c["direction"],
             verb=h["verb"],
             color=h["color"],
-            context=context_for(c["feature"], c["value"]),
+            context=context_for(
+                c["feature"], c["value"], subs_bucket=candidate_bucket,
+            ),
         ))
     return ScoreResponse(
         multiplier=float(r["multiplier"]),
@@ -319,6 +373,14 @@ def score(req: ScoreRequest) -> ScoreResponse:
 
 @app.get("/api/own/packaging-gap", response_model=list[PackagingGapRow])
 def packaging_gap() -> list[PackagingGapRow]:
+    """Compara packaging do canal próprio vs outliers do MESMO TIER.
+
+    Compara contra tier global é a armadilha 3k vs 3M — outliers tier_4
+    usam EXPLICADO em 18%, tier_1 (a faixa dela) só em 7%. Filtrar por
+    tier produz a comparação que faz sentido pra ela.
+    """
+    from jason.models.buckets import bucket_of  # noqa: PLC0415
+
     settings = get_settings()
     own = settings.own_channel_id
     rate_features = [
@@ -334,6 +396,22 @@ def packaging_gap() -> list[PackagingGapRow]:
     ]
 
     with _read_db() as con:
+        # Find own tier from channel subs.
+        row = con.execute(
+            "SELECT subs FROM channels WHERE id = ?", [own],
+        ).fetchone()
+        own_subs = int(row[0]) if row and row[0] is not None else 0
+        own_bucket = bucket_of(own_subs)
+        # Tier bounds — same as feature_context._TIER_BOUNDS.
+        tier_bounds = {
+            0: (0, 1_000),
+            1: (1_000, 10_000),
+            2: (10_000, 100_000),
+            3: (100_000, 1_000_000),
+            4: (1_000_000, 10**12),
+        }
+        lo, hi = tier_bounds[own_bucket]
+
         out = []
         for col, label in rate_features:
             own_v = con.execute(
@@ -349,10 +427,12 @@ def packaging_gap() -> list[PackagingGapRow]:
                 SELECT AVG(CAST(f.{col} AS INT)) FROM videos v
                 JOIN video_features f ON f.video_id = v.id
                 JOIN outliers o ON o.video_id = v.id
+                JOIN channels c ON c.id = v.channel_id
                 WHERE v.is_short = false AND o.percentile_in_channel >= 90
                   AND v.channel_id != ?
+                  AND c.subs >= ? AND c.subs < ?
                 """,
-                [own],
+                [own, lo, hi],
             ).fetchone()[0]
             own_pct = float(own_v or 0) * 100
             niche_pct = float(niche_v or 0) * 100
@@ -367,9 +447,27 @@ def packaging_gap() -> list[PackagingGapRow]:
 
 @app.get("/api/own/themes", response_model=list[ThemeCoverage])
 def themes_coverage() -> list[ThemeCoverage]:
+    """Cobertura de subgêneros: seu canal vs vizinhos do MESMO TIER.
+
+    Como em packaging-gap, comparar contra todos os tiers infla "média
+    nicho" pra valores impossíveis no tier dela. Restringimos pro tier.
+    """
+    from jason.models.buckets import bucket_of  # noqa: PLC0415
+
     settings = get_settings()
     own = settings.own_channel_id
     with _read_db() as con:
+        row = con.execute(
+            "SELECT subs FROM channels WHERE id = ?", [own],
+        ).fetchone()
+        own_subs = int(row[0]) if row and row[0] is not None else 0
+        own_bucket = bucket_of(own_subs)
+        tier_bounds = {
+            0: (0, 1_000), 1: (1_000, 10_000), 2: (10_000, 100_000),
+            3: (100_000, 1_000_000), 4: (1_000_000, 10**12),
+        }
+        lo, hi = tier_bounds[own_bucket]
+
         rows = con.execute(
             """
             WITH own_themes AS (
@@ -386,8 +484,11 @@ def themes_coverage() -> list[ThemeCoverage]:
                        AVG(o.multiplier) AS niche_avg, MAX(o.multiplier) AS niche_top
                 FROM videos v
                 JOIN video_features f ON f.video_id = v.id
+                JOIN channels c ON c.id = v.channel_id
                 LEFT JOIN outliers o ON o.video_id = v.id
-                WHERE v.channel_id != ? AND v.is_short = false AND f.theme_label IS NOT NULL
+                WHERE v.channel_id != ? AND v.is_short = false
+                  AND f.theme_label IS NOT NULL
+                  AND c.subs >= ? AND c.subs < ?
                 GROUP BY 1
             )
             SELECT o.theme_label, o.own_n, o.own_avg, o.own_top,
@@ -397,7 +498,7 @@ def themes_coverage() -> list[ThemeCoverage]:
             ORDER BY o.own_avg DESC NULLS LAST
             LIMIT 50
             """,
-            [own, own],
+            [own, own, lo, hi],
         ).fetchall()
     out = []
     for r in rows:
@@ -422,12 +523,43 @@ def suggest(req: SuggestRequest) -> SuggestResponse:
     from jason.generation.titles import generate_titles, persist_suggestions
     from jason.models.predict import score_title_with_explanation
 
+    from datetime import datetime as _dt  # noqa: PLC0415
+
     settings = get_settings()
     channel_id = req.channel_id or settings.own_channel_id
     duration_s = int(req.duration_min * 60)
 
     if not req.transcript.strip():
         raise HTTPException(status_code=400, detail="Transcrição vazia.")
+
+    # Tier of the channel being scored — restricts the per-feature context
+    # (caps_ratio, duration, etc) to outliers in HER tier, avoiding the
+    # "tier_4 dominates the global pool" misleading numbers.
+    from jason.models.buckets import bucket_of  # noqa: PLC0415
+    candidate_bucket: int | None = None
+    with _read_db() as con:
+        row = con.execute(
+            "SELECT subs FROM channels WHERE id = ?", [channel_id],
+        ).fetchone()
+    if row and row[0] is not None:
+        candidate_bucket = bucket_of(row[0])
+
+    user_supplied_time = bool(req.published_at)
+    pub_dt = None
+    if req.published_at:
+        try:
+            pub_dt = _dt.fromisoformat(req.published_at.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"published_at inválido: {exc}",
+            ) from exc
+
+    IMPLICIT_TIME_FEATURES = {
+        "published_hour", "published_dow",
+        "is_halloween_week", "is_friday_13_week",
+        "days_to_nearest_horror_release",
+    }
 
     try:
         gen = generate_titles(
@@ -447,7 +579,9 @@ def suggest(req: SuggestRequest) -> SuggestResponse:
     for t in gen["titles"]:
         try:
             s = score_title_with_explanation(
-                t, channel_id, duration_s=duration_s, top_k=4,
+                t, channel_id, duration_s=duration_s,
+                published_at=pub_dt,
+                top_k=8, min_magnitude=0.02,
             )
         except FileNotFoundError:
             model_trained = False
@@ -459,6 +593,8 @@ def suggest(req: SuggestRequest) -> SuggestResponse:
         mult = float(s["multiplier"])
         contribs: list[ScoreContribution] = []
         for c in s["contributions"]:
+            if not user_supplied_time and c["feature"] in IMPLICIT_TIME_FEATURES:
+                continue
             h = humanize_contribution(c)
             contribs.append(ScoreContribution(
                 feature=c["feature"],
@@ -468,13 +604,19 @@ def suggest(req: SuggestRequest) -> SuggestResponse:
                 direction=c["direction"],
                 verb=h["verb"],
                 color=h["color"],
-                context=_ctx(c["feature"], c["value"]),
+                context=_ctx(
+                    c["feature"], c["value"], subs_bucket=candidate_bucket,
+                ),
             ))
+        import math as _math  # noqa: PLC0415
+        baseline = float(_math.expm1(float(s.get("base_value", 0.0))))
         candidates.append(SuggestCandidate(
             title=t,
             multiplier=mult,
             multiplier_human=humanize_multiplier(mult),
+            baseline_multiplier=baseline,
             contributions=contribs,
+            n_neutral_features=int(s.get("n_neutral_features", 0)),
         ))
 
     if model_trained:
@@ -501,6 +643,22 @@ def suggest(req: SuggestRequest) -> SuggestResponse:
         rag_outlier_count=len(gen.get("outlier_ids", []) or []),
         model_trained=model_trained,
     )
+
+
+@app.delete("/api/suggestions/{suggestion_id}/chose")
+def unchose_suggestion(suggestion_id: int) -> dict[str, Any]:
+    """Desfaz a escolha — pra erro de clique ou troca de ideia."""
+    with _write_db() as wcon:
+        row = wcon.execute(
+            "SELECT id FROM suggestions WHERE id = ?", [suggestion_id],
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="suggestion not found")
+        wcon.execute(
+            "UPDATE suggestions SET chosen_at = NULL WHERE id = ?",
+            [suggestion_id],
+        )
+    return {"suggestion_id": suggestion_id, "chosen_at": None}
 
 
 @app.post("/api/suggestions/{suggestion_id}/chose", response_model=ChoseResponse)
@@ -623,7 +781,17 @@ async def thumbs_suggest(
         shutil.copyfileobj(video.file, f)
 
     try:
-        candidates = extract_candidate_frames(video_path, output_dir=out_dir)
+        try:
+            candidates = extract_candidate_frames(video_path, output_dir=out_dir)
+        except RuntimeError as exc:
+            # ffmpeg/ffprobe missing — surface the install instruction explicitly.
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"{exc}. Instale com: sudo apt install -y ffmpeg "
+                    "(ou equivalente na sua distro)."
+                ),
+            ) from exc
         kept_paths = [c["path"] for c in candidates if c.get("kept")]
         if not kept_paths:
             raise HTTPException(
@@ -658,12 +826,14 @@ async def thumbs_suggest(
         frames = [
             ThumbFrame(
                 filename=Path(s["path"]).name,
-                score=float(s["score"]),
+                score=float(s.get("combined") or s.get("score") or 0),
                 face_score=float(s.get("face_score") or 0),
                 outlier_similarity=float(s.get("outlier_similarity") or 0),
             )
             for s in scored
         ]
+    except HTTPException:
+        raise  # don't re-wrap our own typed errors (503 ffmpeg, 422 no-frames)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Falha no pipeline: {exc}") from exc
 
@@ -679,6 +849,42 @@ async def thumbs_suggest(
         ),
         palette=palette,
     )
+
+
+@app.get("/api/compare")
+def compare_channels(neighbor_id: str) -> dict[str, Any]:
+    """Comparação 1-a-1 entre canal próprio e canal vizinho."""
+    from jason.features.head_to_head import head_to_head
+    s = get_settings()
+    own = s.own_channel_id
+    if not own:
+        raise HTTPException(status_code=400, detail="own_channel_id not configured")
+    result = head_to_head(own_channel_id=own, neighbor_channel_id=neighbor_id)
+    if result.get("error"):
+        raise HTTPException(status_code=404, detail=result["error"])
+    # Humanize theme labels
+    for k in ("own_themes", "neighbor_themes", "coverage_gap"):
+        for item in result[k]:
+            item["label_human"] = humanize_topic_label(item.get("label"))
+    return result
+
+
+@app.get("/api/sugerir-tema")
+def sugerir_tema(top_k: int = 8, horizon_days: int = 60) -> list[dict[str, Any]]:
+    """Ranking de temas pra cobrir agora — TMDb + momentum + vizinhos + gap."""
+    from jason.features.theme_suggester import suggest_themes
+    rows = suggest_themes(top_k=top_k, horizon_days=horizon_days)
+    for r in rows:
+        r["label_human"] = humanize_topic_label(r.get("label"))
+    return rows
+
+
+@app.get("/api/themes/{theme_id}/keywords")
+def theme_keywords(theme_id: int, top_k: int = 25) -> dict[str, Any]:
+    """Power keywords pra um subgênero (n-gram log-odds outliers vs baseline)."""
+    from jason.features.power_keywords import compute_power_keywords
+    rows = compute_power_keywords(theme_id=theme_id, top_k=top_k)
+    return {"theme_id": theme_id, "keywords": rows}
 
 
 @app.get("/api/thumbs/frame/{job_id}/{filename}")

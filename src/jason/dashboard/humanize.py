@@ -37,6 +37,14 @@ FEATURE_LABELS: dict[str, str] = {
     "thumb_contrast":          "Contraste da thumbnail",
     "thumb_colorfulness":      "Vivacidade de cor da thumbnail",
     "thumb_face_largest_pct":  "Tamanho do maior rosto na thumbnail",
+    "title_to_theme_dist":     "Quão prototípico do subgênero o título é",
+    # VLM thumbnail attributes (preenchidas quando `jason features thumb-vlm` rodar)
+    "has_text_overlay":        "Thumb tem texto sobreposto",
+    "face_emotion":            "Expressão do rosto na thumb",
+    "composition_style":       "Estilo de composição da thumb",
+    "color_palette":           "Paleta de cores",
+    "has_subject_arrow":       "Thumb tem seta/círculo apontando",
+    "subgenre_signal":         "Sinal visual de subgênero",
     # Video / channel
     "duration_s":              "Duração do vídeo",
     "subs_bucket":             "Tamanho do canal (faixa de inscritos)",
@@ -54,6 +62,37 @@ FEATURE_LABELS: dict[str, str] = {
     "title_cluster":           "Estilo de título parecido com outros que viralizaram",
     "thumb_cluster":           "Estilo visual de thumb parecido com outros outliers",
 }
+
+# Tradução dos enums categóricos do VLM thumb annotator pra PT-BR.
+VLM_VALUE_LABELS: dict[str, dict[str, str]] = {
+    "face_emotion": {
+        "reactive": "rosto com reação",
+        "neutral": "rosto neutro",
+        "absent": "sem rosto",
+    },
+    "composition_style": {
+        "reaction": "reaction face",
+        "cinematic": "frame cinematográfico",
+        "collage": "colagem",
+        "screenshot": "print de tela",
+        "other": "outro",
+    },
+    "color_palette": {
+        "high_saturation": "cores vivas",
+        "desaturated": "cores apagadas",
+        "monochrome": "preto e branco",
+        "red_dominant": "vermelho dominante",
+    },
+    "subgenre_signal": {
+        "found_footage": "found footage",
+        "slasher": "slasher",
+        "gore": "gore",
+        "paranormal": "paranormal",
+        "crime": "crime real",
+        "other": "outro",
+    },
+}
+
 
 # Quando o valor é booleano-ish, traduz pra sim/não no contexto.
 _BOOL_TRUE = {"True", "true", "1"}
@@ -123,6 +162,23 @@ def humanize_value(feature: str, raw_value: Any) -> str:
             if v >= -0.5:
                 return f"negativo ({v:+.2f})"
             return f"muito negativo ({v:+.2f})"
+        except (TypeError, ValueError):
+            return s
+
+    # VLM enums viram texto humano em PT-BR.
+    if feature in VLM_VALUE_LABELS:
+        return VLM_VALUE_LABELS[feature].get(s, s)
+
+    if feature == "title_to_theme_dist":
+        try:
+            v = float(s)
+            if v >= 0.7:
+                return f"muito alinhado ({v:.2f})"
+            if v >= 0.5:
+                return f"alinhado ({v:.2f})"
+            if v >= 0.3:
+                return f"meio fora ({v:.2f})"
+            return f"fora do padrão ({v:.2f})" if v > 0 else "—"
         except (TypeError, ValueError):
             return s
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   type ThemeOption,
   type ThumbSuggestion,
@@ -8,14 +8,50 @@ import {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
+const norm = (s: string) =>
+  s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+
 export default function ThumbsPage() {
   const [themes, setThemes] = useState<ThemeOption[]>([]);
   const [themeId, setThemeId] = useState<string>("");
+  const [themeQuery, setThemeQuery] = useState<string>("");
+  const [themeOpen, setThemeOpen] = useState(false);
   const [topK, setTopK] = useState(3);
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ThumbSuggestion | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const themeBoxRef = useRef<HTMLDivElement | null>(null);
+
+  const filteredThemes = useMemo(() => {
+    if (!themeQuery.trim()) return themes;
+    const q = norm(themeQuery);
+    return themes.filter((t) => norm(t.label).includes(q));
+  }, [themes, themeQuery]);
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (
+        themeBoxRef.current &&
+        !themeBoxRef.current.contains(e.target as Node)
+      ) {
+        setThemeOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  function pickTheme(t: ThemeOption | null) {
+    if (t === null) {
+      setThemeId("");
+      setThemeQuery("");
+    } else {
+      setThemeId(String(t.id));
+      setThemeQuery(t.label);
+    }
+    setThemeOpen(false);
+  }
 
   useEffect(() => {
     fetch(`${API_BASE}/api/themes`)
@@ -43,12 +79,19 @@ export default function ThumbsPage() {
         body: fd,
       });
       if (!r.ok) {
-        const text = await r.text().catch(() => "");
-        throw new Error(`${r.status}: ${text || r.statusText}`);
+        const body = await r.text().catch(() => "");
+        let msg = body || r.statusText;
+        try {
+          const j = JSON.parse(body);
+          msg = j.detail || msg;
+        } catch {}
+        throw new Error(`${r.status} · ${msg}`);
       }
       setResult(await r.json());
     } catch (e) {
       setError((e as Error).message);
+      // Garantir que o erro fica visível no topo
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } finally {
       setLoading(false);
     }
@@ -56,6 +99,22 @@ export default function ThumbsPage() {
 
   return (
     <div className="space-y-8 max-w-5xl">
+      {error && (
+        <div className="card border-2 border-[var(--accent)] bg-[var(--accent)]/10 p-4">
+          <div className="text-xs uppercase tracking-wider text-[var(--accent)] mb-2">
+            Erro
+          </div>
+          <div className="text-sm font-mono whitespace-pre-wrap break-words">
+            {error}
+          </div>
+          {error.includes("ffprobe") || error.includes("ffmpeg") ? (
+            <div className="text-xs mt-3 text-[var(--muted)]">
+              ffmpeg não está instalado. No terminal do WSL: <code className="text-[var(--accent)]">sudo apt install -y ffmpeg</code>
+            </div>
+          ) : null}
+        </div>
+      )}
+
       <section>
         <h1 className="text-2xl">Sugerir thumbnail</h1>
         <p className="text-sm text-[var(--muted)] mt-2 max-w-3xl">
@@ -94,22 +153,68 @@ export default function ThumbsPage() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
+          <div ref={themeBoxRef} className="relative">
             <label className="block text-xs uppercase tracking-wider mb-1 text-[var(--muted)]">
               Subgênero (opcional, focaliza score + paleta)
             </label>
-            <select
-              value={themeId}
-              onChange={(e) => setThemeId(e.target.value)}
-              className="w-full bg-[var(--surface-2)] border border-[var(--border)] p-2 text-sm focus:outline-none focus:border-[var(--accent)]"
-            >
-              <option value="">Sem filtro (geral do nicho)</option>
-              {themes.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.label} · {t.n_outliers} outliers
-                </option>
-              ))}
-            </select>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={themeQuery}
+                placeholder="Sem filtro · digite pra buscar (ex: slasher, possessão)"
+                onFocus={() => setThemeOpen(true)}
+                onChange={(e) => {
+                  setThemeQuery(e.target.value);
+                  setThemeOpen(true);
+                  if (!e.target.value) setThemeId("");
+                }}
+                className="flex-1 bg-[var(--surface-2)] border border-[var(--border)] p-2 text-sm focus:outline-none focus:border-[var(--accent)]"
+              />
+              {themeQuery && (
+                <button
+                  type="button"
+                  onClick={() => pickTheme(null)}
+                  className="px-3 border border-[var(--border)] text-xs text-[var(--muted)] hover:text-[var(--accent)]"
+                  title="Limpar filtro"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+            {themeOpen && (
+              <div className="absolute z-10 mt-1 w-full max-h-80 overflow-auto bg-[var(--surface-2)] border border-[var(--border)] shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => pickTheme(null)}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-[var(--surface-3)] border-b border-[var(--border)] text-[var(--muted)]"
+                >
+                  Sem filtro (geral do nicho)
+                </button>
+                {filteredThemes.length === 0 ? (
+                  <div className="px-3 py-3 text-sm text-[var(--muted)]">
+                    Nada encontrado pra "{themeQuery}".
+                  </div>
+                ) : (
+                  filteredThemes.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => pickTheme(t)}
+                      className={`w-full text-left px-3 py-2 text-sm hover:bg-[var(--surface-3)] flex justify-between gap-3 ${
+                        String(t.id) === themeId
+                          ? "bg-[var(--surface-3)]"
+                          : ""
+                      }`}
+                    >
+                      <span>{t.label}</span>
+                      <span className="text-xs font-mono text-[var(--muted)] shrink-0">
+                        {t.n_outliers} outliers
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
           </div>
           <div>
             <label className="block text-xs uppercase tracking-wider mb-1 text-[var(--muted)]">
@@ -142,11 +247,6 @@ export default function ThumbsPage() {
           )}
         </div>
 
-        {error && (
-          <div className="border border-[var(--accent)] text-[var(--accent)] p-3 text-sm font-mono">
-            {error}
-          </div>
-        )}
       </section>
 
       {result && (
@@ -245,9 +345,15 @@ export default function ThumbsPage() {
             </div>
           </section>
 
-          <section className="text-xs text-[var(--muted)] font-mono">
-            job_id: {result.job_id}
-          </section>
+          <details className="text-xs text-[var(--muted)]">
+            <summary className="cursor-pointer hover:text-[var(--text)] uppercase tracking-wider"
+              style={{ fontFamily: "var(--font-display)" }}>
+              ver detalhes técnicos
+            </summary>
+            <div className="mt-2 font-mono pl-4">
+              identificador desta análise: {result.job_id}
+            </div>
+          </details>
         </>
       )}
     </div>

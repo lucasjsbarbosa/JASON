@@ -29,6 +29,7 @@ TITLE_FEATURE_COLS = (
     "has_curiosity_keyword", "has_extreme_adjective",
     "definite_ref_count", "forward_ref_count", "superlative_density",
     "sentiment_score", "arousal_score", "flesch_reading_ease",
+    "title_to_theme_dist",
 )
 
 THUMB_FEATURE_COLS = (
@@ -63,6 +64,46 @@ def _annotate_calendar(df: pd.DataFrame) -> pd.DataFrame:
 
     df["is_friday_13_week"] = ((pub.dt.dayofweek == 4) & (pub.dt.day == 13)).astype(int)
     return df
+
+
+def _compute_title_to_theme_dist(
+    db: Path, theme_id: int, title_embedding: list[float] | None,
+) -> float:
+    """Cosine of candidate title_embedding vs centroid of outliers in same theme.
+
+    Mirrors `features.theme_alignment._compute_centroids` but pulls a single
+    centroid on demand. Returns 0.0 when theme has no centroid (too few
+    outliers, no theme assigned, or no embedding passed).
+    """
+    if title_embedding is None or theme_id is None or int(theme_id) < 0:
+        return 0.0
+    with duckdb.connect(str(db), read_only=True) as con:
+        rows = con.execute(
+            """
+            SELECT f.title_embedding
+            FROM video_features f
+            JOIN outliers o ON o.video_id = f.video_id
+            WHERE o.percentile_in_channel >= 90
+              AND f.theme_id = ?
+              AND f.title_embedding IS NOT NULL
+            """,
+            [int(theme_id)],
+        ).fetchall()
+    if len(rows) < 5:
+        return 0.0
+    embs = [list(r[0]) for r in rows]
+    dim = len(embs[0])
+    mean = [0.0] * dim
+    for e in embs:
+        for i in range(dim):
+            mean[i] += e[i]
+    n = len(embs)
+    for i in range(dim):
+        mean[i] /= n
+    norm = sum(x * x for x in mean) ** 0.5
+    if norm > 0:
+        mean = [x / norm for x in mean]
+    return float(sum(x * y for x, y in zip(mean, title_embedding, strict=True)))
 
 
 def _annotate_horror_distance(con: duckdb.DuckDBPyConnection, df: pd.DataFrame) -> pd.DataFrame:
@@ -124,6 +165,7 @@ def build_feature_matrix(
                COALESCE(f.thumb_contrast, 50.0)         AS thumb_contrast,
                COALESCE(f.thumb_colorfulness, 30.0)     AS thumb_colorfulness,
                COALESCE(f.thumb_face_largest_pct, 0.0)  AS thumb_face_largest_pct,
+               COALESCE(f.title_to_theme_dist, 0.0)     AS title_to_theme_dist,
                CAST(f.has_number AS INTEGER)            AS has_number,
                CAST(f.has_emoji AS INTEGER)             AS has_emoji,
                CAST(f.has_question_mark AS INTEGER)     AS has_question_mark,
@@ -207,6 +249,9 @@ def assemble_score_row(
         "thumb_contrast": 50.0,
         "thumb_colorfulness": 30.0,
         "thumb_face_largest_pct": 0.0,
+        "title_to_theme_dist": _compute_title_to_theme_dist(
+            db, theme_id, title_embedding,
+        ),
         "theme_id": theme_id,
         "franchise_id": franchise_id,
         "title_embedding": title_embedding,

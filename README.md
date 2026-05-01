@@ -44,6 +44,32 @@ uv run jason features topics --themes --franchises
 uv run jason dashboard
 ```
 
+## Rodar num segundo computador (notebook, etc)
+
+O `warehouse.duckdb` e os artifacts do modelo treinado estão versionados via
+**Git LFS** — `git clone` puxa eles automaticamente. Thumbnails (~3GB) NÃO
+estão no repo, mas regeram via `jason ingest thumbnails` (gratuito, vem do
+CDN do YouTube — só os URLs ficam guardados no DB).
+
+```bash
+# Pré-requisitos no notebook: git-lfs + uv + node 20+
+sudo apt install -y git-lfs                # uma vez
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Clone + bootstrap
+git clone https://github.com/lucasjsbarbosa/JASON.git ~/projetos/jason
+cd ~/projetos/jason
+bash scripts/bootstrap-laptop.sh           # faz tudo: lfs pull, uv sync,
+                                           # npm install, re-baixa thumbs
+```
+
+Depois disso, **edite `.env`** com suas chaves (`YOUTUBE_DATA_API_KEY`,
+`ANTHROPIC_API_KEY`) e rode `uv run jason api` + `cd apps/web && npm run dev`.
+
+Manter sincronizado: o desktop é dono da ingestão (snapshot diário roda lá).
+No notebook, `git pull` quando você quiser puxar warehouse atualizado do
+desktop.
+
 ## Cadência de produção
 
 - **Diariamente (ou semanal mínimo)**: `jason snapshot run` — coleta views/likes/comments atuais. Sem isso, o `views_at_28d` da Fase 2 nunca interpola e o modelo da Fase 3 não treina. Use Windows Task Scheduler ou cron — wrapper já em `scripts/weekly_snapshot.sh`.

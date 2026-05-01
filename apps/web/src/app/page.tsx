@@ -1,15 +1,36 @@
-import { api, type OutlierVideo, type OwnMetrics } from "@/lib/api";
+import { BootstrapRibbon } from "./_components/bootstrap-ribbon";
+import {
+  api,
+  type OutlierVideo,
+  type OwnMetrics,
+  type PackagingGapRow,
+  type ThemeCoverage,
+} from "@/lib/api";
 
 async function getData() {
   try {
-    const [metrics, top] = await Promise.all([
+    const [metrics, top, gap, themes] = await Promise.all([
       api<OwnMetrics>("/api/own/metrics"),
       api<OutlierVideo[]>("/api/own/top-videos?limit=8"),
+      api<PackagingGapRow[]>("/api/own/packaging-gap"),
+      api<ThemeCoverage[]>("/api/own/themes"),
     ]);
-    return { metrics, top, error: null as string | null };
+    return { metrics, top, gap, themes, error: null as string | null };
   } catch (e) {
-    return { metrics: null, top: [], error: (e as Error).message };
+    return {
+      metrics: null,
+      top: [],
+      gap: [],
+      themes: [],
+      error: (e as Error).message,
+    };
   }
+}
+
+function pctBlocks(v: number) {
+  // 0..100 → 5 bloquinhos. Não diferencia 8% de 12%, mas dá leitura rápida.
+  const filled = Math.round(Math.max(0, Math.min(100, v)) / 20);
+  return "▮".repeat(filled) + "▯".repeat(5 - filled);
 }
 
 function fmtDate(iso: string | null): string {
@@ -28,7 +49,30 @@ function MetricCard({ label, value, hint }: { label: string; value: string; hint
 }
 
 export default async function Home() {
-  const { metrics, top, error } = await getData();
+  const { metrics, top, gap, themes, error } = await getData();
+
+  // Sort packaging-gap by absolute distance — biggest mismatches first.
+  const sortedGap = [...gap].sort(
+    (a, b) => Math.abs(b.diff_pp) - Math.abs(a.diff_pp),
+  );
+
+  // Filter themes the user has actually published in (own_n > 0), and
+  // surface biggest underperformers + biggest overperformers vs niche.
+  const themesWithOwn = themes.filter((t) => t.own_n > 0);
+  const themesByGap = [...themesWithOwn]
+    .filter(
+      (t) =>
+        t.own_avg_mult !== null &&
+        t.niche_avg_mult !== null &&
+        t.niche_avg_mult > 0 &&
+        (t.niche_n ?? 0) >= 3,
+    )
+    .map((t) => ({
+      ...t,
+      ratio: (t.own_avg_mult ?? 0) / (t.niche_avg_mult ?? 1),
+    }))
+    .sort((a, b) => Math.abs(Math.log(b.ratio)) - Math.abs(Math.log(a.ratio)))
+    .slice(0, 8);
 
   if (error) {
     return (
@@ -52,6 +96,13 @@ export default async function Home() {
         </p>
       </section>
 
+      <BootstrapRibbon>
+        <strong style={{ color: "var(--text)" }}>Ainda em calibração:</strong>{" "}
+        os multipliers usam o snapshot de views mais recente, não a janela
+        estabilizada de 28 dias. Vai ficar mais preciso conforme as semanas
+        passarem e o histórico amadurecer.
+      </BootstrapRibbon>
+
       <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <MetricCard
           label="Vídeos longos"
@@ -72,6 +123,148 @@ export default async function Home() {
           hint="≥ 1.5x da mediana do canal"
         />
       </section>
+
+      {sortedGap.length > 0 && (
+        <section>
+          <h2 className="text-lg mb-2">Packaging — você vs vencedores do seu tamanho</h2>
+          <p className="text-sm text-[var(--muted)] mb-4 max-w-3xl">
+            Compara seus padrões de título com vídeos top-10% de canais 1k–10k
+            inscritos (a sua faixa). Não é cobrança pra copiar, é dimensão do
+            que distingue os dois estilos.
+          </p>
+          <div className="card">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--border)]">
+                  <th className="text-left py-2 font-mono text-xs text-[var(--muted)]">
+                    padrão
+                  </th>
+                  <th className="text-right py-2 font-mono text-xs text-[var(--muted)]">
+                    você
+                  </th>
+                  <th className="text-right py-2 font-mono text-xs text-[var(--muted)]">
+                    seu tamanho
+                  </th>
+                  <th className="text-right py-2 font-mono text-xs text-[var(--muted)]">
+                    diferença
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedGap.map((g) => {
+                  const diff = Math.round(g.diff_pp);
+                  const small = Math.abs(g.diff_pp) < 5;
+                  return (
+                    <tr
+                      key={g.feature}
+                      className="border-b border-[var(--border)]/50"
+                    >
+                      <td className="py-2">{g.feature}</td>
+                      <td className="text-right tabular-nums font-mono text-xs">
+                        <span className="opacity-60 mr-2">
+                          {pctBlocks(g.own_pct)}
+                        </span>
+                        {g.own_pct.toFixed(0)}%
+                      </td>
+                      <td className="text-right tabular-nums font-mono text-xs text-[var(--muted)]">
+                        <span className="opacity-60 mr-2">
+                          {pctBlocks(g.niche_pct)}
+                        </span>
+                        {g.niche_pct.toFixed(0)}%
+                      </td>
+                      <td
+                        className="text-right tabular-nums font-mono text-xs"
+                        style={{
+                          color: small ? "var(--muted)" : "var(--text)",
+                        }}
+                      >
+                        {small
+                          ? "≈ igual"
+                          : diff > 0
+                          ? `você usa +${diff} a cada 100`
+                          : `você usa ${diff} a cada 100`}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {themesByGap.length > 0 && (
+        <section>
+          <h2 className="text-lg mb-2">Subgêneros — sua média vs canais do seu tamanho</h2>
+          <p className="text-sm text-[var(--muted)] mb-4 max-w-3xl">
+            Quanto cada subgênero rendeu pra você (média do multiplier dos
+            seus vídeos do tema) comparado com vizinhos da mesma faixa de
+            inscritos. ▼ você fica abaixo · ▲ você fica acima.
+          </p>
+          <div className="card">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--border)]">
+                  <th className="text-left py-2 font-mono text-xs text-[var(--muted)]">
+                    subgênero
+                  </th>
+                  <th className="text-right py-2 font-mono text-xs text-[var(--muted)]">
+                    seus vídeos
+                  </th>
+                  <th className="text-right py-2 font-mono text-xs text-[var(--muted)]">
+                    sua média
+                  </th>
+                  <th className="text-right py-2 font-mono text-xs text-[var(--muted)]">
+                    seu tamanho
+                  </th>
+                  <th className="text-right py-2 font-mono text-xs text-[var(--muted)]">
+                    razão
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {themesByGap.map((t) => {
+                  const arrow = t.ratio >= 1.2 ? "▲" : t.ratio <= 0.8 ? "▼" : "≈";
+                  const color =
+                    t.ratio >= 1.2
+                      ? "#5BC076"
+                      : t.ratio <= 0.8
+                      ? "var(--accent)"
+                      : "var(--muted)";
+                  return (
+                    <tr
+                      key={t.theme}
+                      className="border-b border-[var(--border)]/50"
+                    >
+                      <td className="py-2">{t.theme}</td>
+                      <td className="text-right tabular-nums font-mono text-xs text-[var(--muted)]">
+                        {t.own_n}
+                      </td>
+                      <td className="text-right tabular-nums font-mono text-xs">
+                        {(t.own_avg_mult ?? 0).toFixed(1)}x
+                      </td>
+                      <td className="text-right tabular-nums font-mono text-xs text-[var(--muted)]">
+                        {(t.niche_avg_mult ?? 0).toFixed(1)}x
+                      </td>
+                      <td
+                        className="text-right tabular-nums font-mono text-xs"
+                        style={{ color }}
+                      >
+                        {arrow} {t.ratio.toFixed(1)}×
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <p className="text-xs text-[var(--muted)] mt-3 max-w-2xl">
+              "Sua média" = mediana de multiplier dos seus vídeos com esse
+              subgênero. "Seu tamanho" = o mesmo, calculado em vizinhos
+              1k–10k. Razão = sua/deles.
+            </p>
+          </div>
+        </section>
+      )}
 
       <section>
         <h2 className="text-lg mb-4">Vídeos que mais bombaram (relativos ao próprio canal)</h2>

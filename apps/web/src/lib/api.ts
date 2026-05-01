@@ -87,7 +87,9 @@ export type SuggestCandidate = {
   suggestion_id: number | null;
   multiplier: number | null;
   multiplier_human: string | null;
+  baseline_multiplier: number | null;
   contributions: ScoreContribution[];
+  n_neutral_features: number;
 };
 
 export type ChoseResponse = {
@@ -106,6 +108,72 @@ export type ThemeOption = {
   id: number;
   label: string;
   n_outliers: number;
+};
+
+export type PowerKeyword = {
+  ngram: string;
+  z_score: number;
+  outlier_count: number;
+  baseline_count: number;
+  lift: number;
+};
+
+export type ThemeKeywords = {
+  theme_id: number;
+  keywords: PowerKeyword[];
+};
+
+export type ThemeSuggestion = {
+  theme_id: number;
+  label: string | null;
+  label_human: string | null;
+  scores: {
+    tmdb_upcoming: number;
+    momentum: number;
+    neighbor_consensus: number;
+    coverage_gap: number;
+  };
+  evidence: {
+    tmdb_titles: string[];
+    momentum_counts: { recent: number; prior: number };
+    n_neighbors_recent: number;
+    own_has_p90_in_theme: boolean;
+  };
+  score_total: number;
+};
+
+export type ChannelSummary = {
+  id: string;
+  title: string;
+  handle: string | null;
+  subs: number;
+  long_total: number;
+  outliers_p90: number;
+  outlier_rate: number | null;
+  median_views_at_28d: number | null;
+};
+
+export type PackagingDiff = {
+  feature: string;
+  own_pct: number;
+  neighbor_pct: number;
+  delta: number;
+};
+
+export type ThemeBreakdown = {
+  theme_id: number;
+  label: string | null;
+  outlier_count: number;
+  label_human: string | null;
+};
+
+export type CompareResponse = {
+  own: ChannelSummary;
+  neighbor: ChannelSummary;
+  packaging_diff: PackagingDiff[];
+  own_themes: ThemeBreakdown[];
+  neighbor_themes: ThemeBreakdown[];
+  coverage_gap: ThemeBreakdown[];
 };
 
 export type ThumbFrame = {

@@ -1,18 +1,39 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { api, type ScoreResponse } from "@/lib/api";
 
+type WhenChoice = "unset" | "today_18" | "today_20" | "tomorrow_18" | "custom";
+
+function isoForChoice(choice: WhenChoice, custom: string): string | null {
+  if (choice === "unset") return null;
+  if (choice === "custom") return custom || null;
+  const now = new Date();
+  const target = new Date(now);
+  if (choice === "today_18") target.setHours(18, 0, 0, 0);
+  else if (choice === "today_20") target.setHours(20, 0, 0, 0);
+  else if (choice === "tomorrow_18") {
+    target.setDate(target.getDate() + 1);
+    target.setHours(18, 0, 0, 0);
+  }
+  return target.toISOString();
+}
+
 export default function AvaliarPage() {
-  const [title, setTitle] = useState(
-    "FINAL EXPLICADO de Hereditário (2018)",
-  );
+  const [title, setTitle] = useState("");
   const [duration, setDuration] = useState(40);
   const [channelId, setChannelId] = useState("");
+  const [whenChoice, setWhenChoice] = useState<WhenChoice>("unset");
+  const [customWhen, setCustomWhen] = useState<string>("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ScoreResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const publishedAt = useMemo(
+    () => isoForChoice(whenChoice, customWhen),
+    [whenChoice, customWhen],
+  );
 
   async function submit() {
     if (!title.trim()) {
@@ -29,6 +50,7 @@ export default function AvaliarPage() {
           title,
           duration_min: duration,
           channel_id: channelId.trim() || null,
+          published_at: publishedAt,
         }),
       });
       setResult(r);
@@ -84,6 +106,56 @@ export default function AvaliarPage() {
           </span>
           <div className="text-xs text-[var(--muted)] mt-1">
             Análises longas (30–50 min) costumam performar melhor no nicho.
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs uppercase tracking-wider mb-1 text-[var(--muted)]">
+            Pretende publicar quando? <span className="text-[var(--muted)]">(opcional)</span>
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { v: "unset" as const, l: "deixar de fora" },
+              { v: "today_18" as const, l: "hoje 18h" },
+              { v: "today_20" as const, l: "hoje 20h" },
+              { v: "tomorrow_18" as const, l: "amanhã 18h" },
+              { v: "custom" as const, l: "outro horário…" },
+            ].map((opt) => {
+              const active = whenChoice === opt.v;
+              return (
+                <button
+                  key={opt.v}
+                  type="button"
+                  onClick={() => setWhenChoice(opt.v)}
+                  className="text-xs uppercase tracking-wider px-3 py-1.5 border transition-colors"
+                  style={{
+                    fontFamily: "var(--font-display)",
+                    borderColor: active ? "var(--accent)" : "var(--border)",
+                    color: active ? "var(--text)" : "var(--muted)",
+                    background: "transparent",
+                  }}
+                >
+                  {opt.l}
+                </button>
+              );
+            })}
+          </div>
+          {whenChoice === "custom" && (
+            <input
+              type="datetime-local"
+              value={customWhen.slice(0, 16)}
+              onChange={(e) =>
+                setCustomWhen(
+                  e.target.value ? new Date(e.target.value).toISOString() : "",
+                )
+              }
+              className="mt-2 bg-[var(--surface-2)] border border-[var(--border)] p-2 text-sm font-mono focus:outline-none focus:border-[var(--accent)]"
+            />
+          )}
+          <div className="text-xs text-[var(--muted)] mt-2 max-w-xl">
+            "Deixar de fora" omite hora, dia da semana, semana do Halloween e
+            distância de lançamento da explicação. Quando você escolhe um
+            horário, eles voltam à conta.
           </div>
         </div>
 
@@ -155,25 +227,28 @@ export default function AvaliarPage() {
               <li>
                 <span style={{ color: "#5BC076" }}>▲ ajudou</span> /{" "}
                 <span style={{ color: "var(--accent)" }}>▼ atrapalhou</span>:
-                modelo previu pro <strong>seu canal</strong> (3.5k subs)
+                o que o modelo previu pra <strong>esse título nesse canal</strong>
               </li>
               <li>
-                <span className="font-mono">Nicho geral:</span> estatística
-                dos top-10% nos 41 canais ingeridos
+                <span className="font-mono">Outliers do seu tamanho:</span> o
+                que vídeos vencedores de canais da mesma faixa (1k–10k subs)
+                costumam ter — pode discordar do modelo, e isso é informação
+                em si.
               </li>
             </ul>
             <div className="text-xs mb-3 p-2 border border-[var(--border)]" style={{ background: "var(--surface-2)", color: "#A8A39A" }}>
-              <strong style={{ color: "#D4AF37" }}>⚠ calibração:</strong>{" "}
-              modelo está em modo bootstrap (multiplier sem cohort 28d ainda),
-              tier_1 (sua faixa) tem ~151 outliers de sample. Features
-              com contribuição menor que ±0.05 são filtradas (ruído,
-              não signal). Vai ficar mais nítido conforme acumular snapshots.
+              <strong style={{ color: "#D4AF37" }}>⚠ ainda em calibração:</strong>{" "}
+              o modelo está aprendendo. Hoje ele tem ~151 vídeos vencedores
+              da sua faixa de canal (1k–10k inscritos) como referência;
+              dimensões com efeito muito pequeno são omitidas pra não
+              poluir. Vai ficar mais preciso quando acumular semanas de
+              histórico das views.
               {result.n_neutral_features > 0 && (
                 <>
                   {" "}
                   <span className="font-mono">
-                    ({result.n_neutral_features} features tiveram impacto desprezível
-                    e foram omitidas.)
+                    ({result.n_neutral_features} dimensões sem efeito
+                    relevante foram omitidas.)
                   </span>
                 </>
               )}

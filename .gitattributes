@@ -1,0 +1,11 @@
+# Git LFS — arquivos pesados do warehouse e modelos treinados.
+# Necessário pra clonar o repo e o JASON funcionar sem reingerir tudo
+# do zero. Thumbs (`data/thumbnails/`) NÃO entram aqui — regeram via
+# `jason ingest thumbnails` (custa 0 quota, baixa do CDN do YouTube).
+
+data/warehouse.duckdb              filter=lfs diff=lfs merge=lfs -text
+src/jason/models/artifacts/**/*.lgb     filter=lfs diff=lfs merge=lfs -text
+src/jason/models/artifacts/**/*.pkl     filter=lfs diff=lfs merge=lfs -text
+src/jason/models/artifacts/**/meta.json
+src/jason/models/artifacts/**/best_params.json
+src/jason/models/artifacts/bertopic_*   filter=lfs diff=lfs merge=lfs -text
