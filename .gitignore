@@ -27,7 +27,9 @@ htmlcov/
 **/yt_token.json
 
 # --- JASON data --------------------------------------------------------------
-data/
+# `data/*` (não `data/`): permite re-include via `!`. Com trailing slash
+# git proíbe re-include de filhos de diretório excluído.
+data/*
 !data/.gitkeep
 # warehouse.duckdb shippa via Git LFS (estado do projeto). Thumbnails NÃO
 # (regeram via `jason ingest thumbnails`, free, vem do CDN do YouTube).
